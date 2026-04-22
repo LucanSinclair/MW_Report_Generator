@@ -16,6 +16,7 @@ NS = {
     "main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
     "rel": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
 }
+MAIN_NS = f"{{{NS['main']}}}"
 
 
 NUMERIC_NA = {"", "N", "NA", "None", "null"}
@@ -142,6 +143,10 @@ def _cell_value(cell: ET.Element, shared: list[str]) -> str:
     return cell.findtext("main:v", default="", namespaces=NS)
 
 
+def _column_name(cell_ref: str) -> str:
+    return "".join(ch for ch in cell_ref if ch.isalpha())
+
+
 def _sheet_xml_path_by_name(zf: zipfile.ZipFile) -> dict[str, str]:
     workbook = ET.fromstring(zf.read("xl/workbook.xml"))
     rels = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
@@ -153,18 +158,35 @@ def _sheet_xml_path_by_name(zf: zipfile.ZipFile) -> dict[str, str]:
     return result
 
 
-def _read_sheet_rows(zf: zipfile.ZipFile, sheet_path: str) -> list[dict[str, str]]:
-    shared = _shared_strings(zf)
-    root = ET.fromstring(zf.read(sheet_path))
+def _iter_sheet_rows(zf: zipfile.ZipFile, sheet_path: str, shared: list[str]):
+    with zf.open(sheet_path) as sheet_file:
+        for _, row in ET.iterparse(sheet_file, events=("end",)):
+            if row.tag != f"{MAIN_NS}row":
+                continue
+            row_number = int(row.attrib.get("r", "0") or 0)
+            values: dict[str, str] = {}
+            for cell in row.findall(f"{MAIN_NS}c"):
+                column = _column_name(cell.attrib.get("r", ""))
+                if not column:
+                    continue
+                values[column] = _clean(_cell_value(cell, shared))
+            yield row_number, values
+            row.clear()
+
+
+def _sheet_headers(zf: zipfile.ZipFile, sheet_path: str, shared: list[str]) -> dict[str, str]:
+    for row_number, values in _iter_sheet_rows(zf, sheet_path, shared):
+        if row_number == 3:
+            return values
+        if row_number > 3:
+            break
+    return {}
+
+
+def _read_sheet_rows(zf: zipfile.ZipFile, sheet_path: str, shared: list[str]) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     header_by_col: dict[str, str] = {}
-    for row in root.findall(".//main:sheetData/main:row", NS):
-        row_number = int(row.attrib["r"])
-        values: dict[str, str] = {}
-        for cell in row.findall("main:c", NS):
-            ref = cell.attrib["r"]
-            column = "".join(ch for ch in ref if ch.isalpha())
-            values[column] = _clean(_cell_value(cell, shared))
+    for row_number, values in _iter_sheet_rows(zf, sheet_path, shared):
         if row_number == 3:
             header_by_col = values
             continue
@@ -183,12 +205,11 @@ def _find_sheet(sheet_map: dict[str, str], expected_headers: set[str]) -> str:
     return ""
 
 
-def _sheet_with_headers(zf: zipfile.ZipFile, expected_headers: set[str]) -> str:
-    for name, path in _sheet_xml_path_by_name(zf).items():
-        rows = _read_sheet_rows(zf, path)
-        if not rows:
+def _sheet_with_headers(zf: zipfile.ZipFile, expected_headers: set[str], shared: list[str]) -> str:
+    for _, path in _sheet_xml_path_by_name(zf).items():
+        headers = set(_sheet_headers(zf, path, shared).values())
+        if not headers:
             continue
-        headers = set(rows[0].keys())
         if expected_headers.issubset(headers):
             return path
     raise ReportError(f"Could not find worksheet with headers: {sorted(expected_headers)}")
@@ -197,16 +218,19 @@ def _sheet_with_headers(zf: zipfile.ZipFile, expected_headers: set[str]) -> str:
 def load_workbook_dataset(file_bytes: bytes, filename: str = "") -> Dataset:
     try:
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            shared = _shared_strings(zf)
             sheet_10m = _sheet_with_headers(
                 zf,
                 {"id_10m", "Section", "Assessed25", "Mangrove_Presence_25", "Naturalness25", "Physical_Damage25"},
+                shared,
             )
             sheet_50m = _sheet_with_headers(
                 zf,
                 {"id_10m", "Section", "Assessed25", "Mangrove_Presence25_50", "Density25", "Maturity25", "Condition_Score25"},
+                shared,
             )
-            points_10m = _read_sheet_rows(zf, sheet_10m)
-            points_50m = _read_sheet_rows(zf, sheet_50m)
+            points_10m = _read_sheet_rows(zf, sheet_10m, shared)
+            points_50m = _read_sheet_rows(zf, sheet_50m, shared)
     except zipfile.BadZipFile as exc:
         raise ReportError(
             "Workbook upload must be an .xlsx or .xlsm file. Legacy .xls files are not supported."
