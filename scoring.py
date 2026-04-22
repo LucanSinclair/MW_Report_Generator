@@ -737,16 +737,16 @@ def _table_rows(score_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         output.append(
             {
                 "label": row["label"],
-                "cover": _format_number(metrics["cover"]["score"]),
-                "cover_grade": metrics["cover"]["score_grade"] or "N/A",
-                "cover_raw": _format_number(metrics["cover"]["raw"]),
+                "cover": _format_number(metrics["cover"]["raw"]),
+                "cover_grade": metrics["cover"]["raw_grade"] or "N/A",
                 "density": _format_number(metrics["density"]["score"]),
                 "density_grade": metrics["density"]["score_grade"] or "N/A",
                 "maturity": _format_number(metrics["maturity"]["score"]),
                 "maturity_grade": metrics["maturity"]["score_grade"] or "N/A",
                 "condition": _format_number(metrics["condition"]["score"]),
                 "condition_grade": metrics["condition"]["score_grade"] or "N/A",
-                "canopy_cover_score": _format_number(metrics["condition"]["score"]),
+                "canopy_cover_score": _format_number(metrics["cover"]["score"]),
+                "canopy_cover_grade": metrics["cover"]["score_grade"] or "N/A",
                 "damage": _format_number(metrics["damage"]["score"]),
                 "damage_grade": metrics["damage"]["score_grade"] or "N/A",
                 "modification": _format_number(metrics["modification"]["score"]),
@@ -782,10 +782,6 @@ def generate_report(dataset: Dataset, sections: list[str] | None = None, output_
             if section_10m or section_50m:
                 score_rows.append(_score_group(f"Section {section}", section_10m, section_50m))
 
-    warnings = [
-        "Naturalness25 is interpreted as shoreline modification using workbook-compatible mapping: 0-1 natural, 2 modified, 3 impervious."
-    ]
-
     point_maps = _metric_map_configs(_map_points_10m(rows_10m), _map_points_50m(rows_50m))
     return {
         "source_name": dataset.metadata["source_name"],
@@ -796,7 +792,7 @@ def generate_report(dataset: Dataset, sections: list[str] | None = None, output_
         "score_rows": score_rows,
         "table_rows": _table_rows(score_rows),
         "point_maps": point_maps,
-        "warnings": warnings,
+        "warnings": [],
         "sample_counts": {
             "rows_10m": len(rows_10m),
             "rows_50m": len(rows_50m),

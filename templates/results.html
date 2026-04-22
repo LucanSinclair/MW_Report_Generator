@@ -74,6 +74,7 @@
               <th>Habitat Structure</th>
               <th>Structure Grade</th>
               <th>Canopy Cover Score</th>
+              <th>Canopy Cover Grade</th>
               <th>Habitat Impact</th>
               <th>Impact Grade</th>
               <th>Indicator Score</th>
@@ -99,6 +100,7 @@
               <td>{{ row.structure_score }}</td>
               <td class="grade {{ row.structure_grade|lower|replace(' ', '-') }}">{{ row.structure_grade }}</td>
               <td>{{ row.canopy_cover_score }}</td>
+              <td class="grade {{ row.canopy_cover_grade|lower|replace(' ', '-') }}">{{ row.canopy_cover_grade }}</td>
               <td>{{ row.impact_score }}</td>
               <td class="grade {{ row.impact_grade|lower|replace(' ', '-') }}">{{ row.impact_grade }}</td>
               <td>{{ row.indicator_score }}</td>
