@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from flask import Flask, redirect, render_template, request, url_for
@@ -9,6 +10,7 @@ from scoring import ReportError, generate_report, load_csv_dataset, load_workboo
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
+app.logger.setLevel(logging.INFO)
 
 
 @app.route("/", methods=["GET"])
@@ -37,6 +39,13 @@ def report():
         result = generate_report(dataset, sections=sections, output_mode=output_mode)
     except ReportError as exc:
         return render_template("index.html", error=str(exc), previous=request.form), 400
+    except Exception:
+        app.logger.exception("Unexpected error while generating report")
+        return render_template(
+            "index.html",
+            error="The upload could not be processed. Use an .xlsx/.xlsm workbook or matching CSV files, then try again.",
+            previous=request.form,
+        ), 500
 
     return render_template("results.html", report=result, maps_json=maps_json(result))
 

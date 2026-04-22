@@ -195,17 +195,22 @@ def _sheet_with_headers(zf: zipfile.ZipFile, expected_headers: set[str]) -> str:
 
 
 def load_workbook_dataset(file_bytes: bytes, filename: str = "") -> Dataset:
-    with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
-        sheet_10m = _sheet_with_headers(
-            zf,
-            {"id_10m", "Section", "Assessed25", "Mangrove_Presence_25", "Naturalness25", "Physical_Damage25"},
-        )
-        sheet_50m = _sheet_with_headers(
-            zf,
-            {"id_10m", "Section", "Assessed25", "Mangrove_Presence25_50", "Density25", "Maturity25", "Condition_Score25"},
-        )
-        points_10m = _read_sheet_rows(zf, sheet_10m)
-        points_50m = _read_sheet_rows(zf, sheet_50m)
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            sheet_10m = _sheet_with_headers(
+                zf,
+                {"id_10m", "Section", "Assessed25", "Mangrove_Presence_25", "Naturalness25", "Physical_Damage25"},
+            )
+            sheet_50m = _sheet_with_headers(
+                zf,
+                {"id_10m", "Section", "Assessed25", "Mangrove_Presence25_50", "Density25", "Maturity25", "Condition_Score25"},
+            )
+            points_10m = _read_sheet_rows(zf, sheet_10m)
+            points_50m = _read_sheet_rows(zf, sheet_50m)
+    except zipfile.BadZipFile as exc:
+        raise ReportError(
+            "Workbook upload must be an .xlsx or .xlsm file. Legacy .xls files are not supported."
+        ) from exc
     return _finalize_dataset(points_10m, points_50m, source_name=filename or "Workbook")
 
 
