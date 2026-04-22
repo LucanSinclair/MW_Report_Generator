@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mangrove Watch Report Generator</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Mangrove Watch</p>
+        <h1>Report Generator</h1>
+        <p class="lede">
+          Upload a workbook or matching 10 m and 50 m CSV files, choose sections, and return
+          the habitat scores, summary table, and point maps.
+        </p>
+      </div>
+    </section>
+
+    <section class="panel">
+      {% if error %}
+      <div class="alert alert-error">{{ error }}</div>
+      {% endif %}
+      <form action="{{ url_for('report') }}" method="post" enctype="multipart/form-data" class="upload-form">
+        <div class="field-grid">
+          <label class="field">
+            <span>Workbook upload</span>
+            <input type="file" name="workbook" accept=".xlsm,.xlsx,.xls">
+            <small>Preferred. The app auto-detects the 2025 10 m and 50 m sheets.</small>
+          </label>
+
+          <label class="field">
+            <span>10 m CSV upload</span>
+            <input type="file" name="csv_10m" accept=".csv">
+            <small>Optional alternative. Must include the 2025 10 m headers.</small>
+          </label>
+
+          <label class="field">
+            <span>50 m CSV upload</span>
+            <input type="file" name="csv_50m" accept=".csv">
+            <small>Required only when using CSV mode.</small>
+          </label>
+
+          <label class="field">
+            <span>Sections</span>
+            <input type="text" name="sections" placeholder="all or 1,2,6" value="{{ previous.sections if previous else 'all' }}">
+            <small>Use <code>all</code> or a comma-separated list.</small>
+          </label>
+
+          <label class="field">
+            <span>Output mode</span>
+            <select name="output_mode">
+              {% set selected = previous.output_mode if previous else 'both' %}
+              <option value="both" {% if selected == 'both' %}selected{% endif %}>Both pooled and by section</option>
+              <option value="pooled" {% if selected == 'pooled' %}selected{% endif %}>Pooled only</option>
+              <option value="by_section" {% if selected == 'by_section' %}selected{% endif %}>By section only</option>
+            </select>
+            <small>Pooled combines the selected sections into one result row.</small>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="submit">Generate Report</button>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

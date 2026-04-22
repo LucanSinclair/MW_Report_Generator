@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mangrove Watch Results</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+</head>
+<body>
+  <main class="page page-results">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Mangrove Watch</p>
+        <h1>Report Results</h1>
+        <p class="lede">{{ report.source_name }} | Sections: {{ report.selected_section_label }}</p>
+      </div>
+      <a class="secondary-link" href="{{ url_for('index') }}">New run</a>
+    </section>
+
+    {% if report.warnings %}
+    <section class="panel">
+      <div class="alert">
+        {% for warning in report.warnings %}
+        <p>{{ warning }}</p>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="panel summary-strip">
+      <div>
+        <span class="summary-label">Selected sections</span>
+        <strong>{{ report.selected_section_label }}</strong>
+      </div>
+      <div>
+        <span class="summary-label">Assessed 10 m rows</span>
+        <strong>{{ report.sample_counts.rows_10m }}</strong>
+      </div>
+      <div>
+        <span class="summary-label">Assessed 50 m rows</span>
+        <strong>{{ report.sample_counts.rows_50m }}</strong>
+      </div>
+      <div>
+        <span class="summary-label">Output mode</span>
+        <strong>{{ report.output_mode }}</strong>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Score Table</h2>
+      {% if report.output_mode == 'both' %}
+      <p class="table-note">
+        The first row is the combined result for the selected sections. The rows below it are individual section results.
+      </p>
+      {% endif %}
+      <div class="table-wrap">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Result</th>
+              <th>%Cover</th>
+              <th>%Cover Grade</th>
+              <th>Density</th>
+              <th>Density Grade</th>
+              <th>Maturity</th>
+              <th>Maturity Grade</th>
+              <th>Condition</th>
+              <th>Condition Grade</th>
+              <th>Mangrove Damage</th>
+              <th>Damage Grade</th>
+              <th>Shoreline Modification</th>
+              <th>Modification Grade</th>
+              <th>Habitat Structure</th>
+              <th>Structure Grade</th>
+              <th>Canopy Cover Score</th>
+              <th>Habitat Impact</th>
+              <th>Impact Grade</th>
+              <th>Indicator Score</th>
+              <th>Indicator Grade</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in report.table_rows %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td>{{ row.cover }}</td>
+              <td class="grade {{ row.cover_grade|lower|replace(' ', '-') }}">{{ row.cover_grade }}</td>
+              <td>{{ row.density }}</td>
+              <td class="grade {{ row.density_grade|lower|replace(' ', '-') }}">{{ row.density_grade }}</td>
+              <td>{{ row.maturity }}</td>
+              <td class="grade {{ row.maturity_grade|lower|replace(' ', '-') }}">{{ row.maturity_grade }}</td>
+              <td>{{ row.condition }}</td>
+              <td class="grade {{ row.condition_grade|lower|replace(' ', '-') }}">{{ row.condition_grade }}</td>
+              <td>{{ row.damage }}</td>
+              <td class="grade {{ row.damage_grade|lower|replace(' ', '-') }}">{{ row.damage_grade }}</td>
+              <td>{{ row.modification }}</td>
+              <td class="grade {{ row.modification_grade|lower|replace(' ', '-') }}">{{ row.modification_grade }}</td>
+              <td>{{ row.structure_score }}</td>
+              <td class="grade {{ row.structure_grade|lower|replace(' ', '-') }}">{{ row.structure_grade }}</td>
+              <td>{{ row.canopy_cover_score }}</td>
+              <td>{{ row.impact_score }}</td>
+              <td class="grade {{ row.impact_grade|lower|replace(' ', '-') }}">{{ row.impact_grade }}</td>
+              <td>{{ row.indicator_score }}</td>
+              <td class="grade {{ row.indicator_grade|lower|replace(' ', '-') }}">{{ row.indicator_grade }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Point Maps</h2>
+      <div class="map-grid">
+        {% for item in report.point_maps %}
+        <article class="map-card">
+          <div class="map-card-header">
+            <h3>{{ item.title }}</h3>
+          </div>
+          <div class="map" id="{{ item.id }}"></div>
+          <div class="legend legend-below">
+            {% for legend in item.legend %}
+            <div class="legend-row">
+              <span class="swatch" style="background-color: {{ legend.color }}"></span>
+              <span>{{ legend.label }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+    const mapConfigs = {{ maps_json|safe }};
+    mapConfigs.forEach((config) => {
+      const map = L.map(config.id);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors"
+      }).addTo(map);
+
+      const bounds = [];
+      config.points.forEach((point) => {
+        const marker = L.circleMarker([point.lat, point.lon], {
+          radius: 5,
+          fillColor: point.color,
+          color: "#ffffff",
+          weight: 1,
+          opacity: 1,
+          fillOpacity: 0.88
+        });
+        marker.bindPopup(
+          `<strong>Section ${point.section || "?"}</strong><br>` +
+          `Point ${point.point_id || "N/A"}<br>` +
+          `Value: ${point.value}`
+        );
+        marker.addTo(map);
+        bounds.push([point.lat, point.lon]);
+      });
+
+      if (bounds.length) {
+        map.fitBounds(bounds, { padding: [24, 24] });
+      } else {
+        map.setView([-17.63, 146.1], 11);
+      }
+    });
+  </script>
+</body>
+</html>
