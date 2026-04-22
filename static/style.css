@@ -270,11 +270,27 @@ button {
   border-radius: 8px;
   overflow: hidden;
   background: #fcfefd;
+  display: flex;
+  flex-direction: column;
 }
 
 .map-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 14px 16px;
   border-bottom: 1px solid #e1ebe2;
+}
+
+.map-expand-button {
+  border: 1px solid #b7cabd;
+  border-radius: 999px;
+  background: #f6fbf7;
+  color: var(--accent-strong);
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .legend {
@@ -308,6 +324,33 @@ button {
   height: 360px;
 }
 
+.leaflet-control-layers {
+  font-size: 0.88rem;
+}
+
+body.map-overlay-open {
+  overflow: hidden;
+}
+
+.map-card-fullscreen {
+  position: fixed;
+  inset: 16px;
+  z-index: 2000;
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.map-card-fullscreen .map {
+  flex: 1;
+  height: auto;
+  min-height: 420px;
+}
+
+.map-card-fullscreen .legend-below {
+  max-height: 180px;
+  overflow: auto;
+}
+
 @media (max-width: 860px) {
   .hero {
     flex-direction: column;
@@ -320,5 +363,14 @@ button {
 
   .map-grid {
     grid-template-columns: 1fr;
+  }
+
+  .map-card-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .map-card-fullscreen {
+    inset: 8px;
   }
 }

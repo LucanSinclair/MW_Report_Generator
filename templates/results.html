@@ -119,6 +119,7 @@
         <article class="map-card">
           <div class="map-card-header">
             <h3>{{ item.title }}</h3>
+            <button type="button" class="map-expand-button" data-map-target="{{ item.id }}">Full screen</button>
           </div>
           <div class="map" id="{{ item.id }}"></div>
           <div class="legend legend-below">
@@ -138,12 +139,57 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script>
     const mapConfigs = {{ maps_json|safe }};
+    const mapInstances = [];
+
+    function invalidateMapLayout(map) {
+      window.setTimeout(() => map.invalidateSize(), 150);
+    }
+
+    function setExpandedCard(card) {
+      const current = document.querySelector(".map-card-fullscreen");
+      if (current && current !== card) {
+        current.classList.remove("map-card-fullscreen");
+        const currentButton = current.querySelector(".map-expand-button");
+        if (currentButton) currentButton.textContent = "Full screen";
+      }
+
+      if (!card) {
+        document.body.classList.remove("map-overlay-open");
+        mapInstances.forEach(invalidateMapLayout);
+        return;
+      }
+
+      const willExpand = !card.classList.contains("map-card-fullscreen");
+      card.classList.toggle("map-card-fullscreen", willExpand);
+      document.body.classList.toggle("map-overlay-open", willExpand);
+
+      const button = card.querySelector(".map-expand-button");
+      if (button) {
+        button.textContent = willExpand ? "Close full screen" : "Full screen";
+      }
+
+      mapInstances.forEach(invalidateMapLayout);
+    }
+
     mapConfigs.forEach((config) => {
       const map = L.map(config.id);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      const streetLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
         attribution: "&copy; OpenStreetMap contributors"
       }).addTo(map);
+      const satelliteLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 19,
+        attribution: "Tiles &copy; Esri"
+      });
+
+      L.control.layers(
+        {
+          "Street": streetLayer,
+          "Satellite": satelliteLayer
+        },
+        null,
+        { collapsed: true }
+      ).addTo(map);
 
       const bounds = [];
       config.points.forEach((point) => {
@@ -168,6 +214,20 @@
         map.fitBounds(bounds, { padding: [24, 24] });
       } else {
         map.setView([-17.63, 146.1], 11);
+      }
+
+      mapInstances.push(map);
+    });
+
+    document.querySelectorAll(".map-expand-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        setExpandedCard(button.closest(".map-card"));
+      });
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        setExpandedCard(null);
       }
     });
   </script>
