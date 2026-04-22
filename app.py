@@ -16,8 +16,11 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/report", methods=["POST"])
+@app.route("/report", methods=["GET", "POST"])
 def report():
+    if request.method == "GET":
+        return redirect(url_for("index"))
+
     sections = parse_sections(request.form.get("sections", "all"))
     output_mode = request.form.get("output_mode", "both")
     workbook = request.files.get("workbook")
