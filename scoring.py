@@ -802,3 +802,86 @@ def generate_report(dataset: Dataset, sections: list[str] | None = None, output_
 
 def maps_json(report: dict[str, Any]) -> str:
     return json.dumps(report["point_maps"])
+
+
+def _csv_text(fieldnames: list[str], rows: list[dict[str, Any]]) -> str:
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return buffer.getvalue()
+
+
+def report_table_csv(report: dict[str, Any]) -> str:
+    fieldnames = [
+        "Result",
+        "%Cover",
+        "%Cover Grade",
+        "Density",
+        "Density Grade",
+        "Maturity",
+        "Maturity Grade",
+        "Condition",
+        "Condition Grade",
+        "Mangrove Damage",
+        "Damage Grade",
+        "Shoreline Modification",
+        "Modification Grade",
+        "Habitat Structure",
+        "Structure Grade",
+        "Canopy Cover Score",
+        "Canopy Cover Grade",
+        "Habitat Impact",
+        "Impact Grade",
+        "Indicator Score",
+        "Indicator Grade",
+    ]
+    rows = []
+    for row in report["table_rows"]:
+        rows.append(
+            {
+                "Result": row["label"],
+                "%Cover": row["cover"],
+                "%Cover Grade": row["cover_grade"],
+                "Density": row["density"],
+                "Density Grade": row["density_grade"],
+                "Maturity": row["maturity"],
+                "Maturity Grade": row["maturity_grade"],
+                "Condition": row["condition"],
+                "Condition Grade": row["condition_grade"],
+                "Mangrove Damage": row["damage"],
+                "Damage Grade": row["damage_grade"],
+                "Shoreline Modification": row["modification"],
+                "Modification Grade": row["modification_grade"],
+                "Habitat Structure": row["structure_score"],
+                "Structure Grade": row["structure_grade"],
+                "Canopy Cover Score": row["canopy_cover_score"],
+                "Canopy Cover Grade": row["canopy_cover_grade"],
+                "Habitat Impact": row["impact_score"],
+                "Impact Grade": row["impact_grade"],
+                "Indicator Score": row["indicator_score"],
+                "Indicator Grade": row["indicator_grade"],
+            }
+        )
+    return _csv_text(fieldnames, rows)
+
+
+def map_points_csv(map_config: dict[str, Any]) -> str:
+    value_labels = {entry["value"]: entry["label"] for entry in map_config.get("legend", [])}
+    fieldnames = ["Metric", "Section", "Point ID", "Latitude", "Longitude", "Value", "Value Label", "Color"]
+    rows = []
+    for point in map_config.get("points", []):
+        rows.append(
+            {
+                "Metric": map_config.get("title", map_config.get("metric", "")),
+                "Section": point.get("section", ""),
+                "Point ID": point.get("point_id", ""),
+                "Latitude": point.get("lat", ""),
+                "Longitude": point.get("lon", ""),
+                "Value": point.get("value", ""),
+                "Value Label": value_labels.get(point.get("value"), ""),
+                "Color": point.get("color", ""),
+            }
+        )
+    return _csv_text(fieldnames, rows)

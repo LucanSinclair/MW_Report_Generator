@@ -48,7 +48,10 @@
     </section>
 
     <section class="panel">
-      <h2>Score Table</h2>
+      <div class="panel-header">
+        <h2>Score Table</h2>
+        <a class="secondary-link compact-link" href="{{ url_for('download_report_csv', report_id=report_id) }}">Download CSV</a>
+      </div>
       {% if report.output_mode == 'both' %}
       <p class="table-note">
         The first row is the combined result for the selected sections. The rows below it are individual section results.
@@ -119,7 +122,11 @@
         <article class="map-card">
           <div class="map-card-header">
             <h3>{{ item.title }}</h3>
-            <button type="button" class="map-expand-button" data-map-target="{{ item.id }}">Full screen</button>
+            <div class="map-card-actions">
+              <a class="secondary-link compact-link" href="{{ url_for('download_map_csv', report_id=report_id, metric=item.metric) }}">Download CSV</a>
+              <button type="button" class="map-download-button" data-map-target="{{ item.id }}" data-map-title="{{ item.title }}">Download PNG</button>
+              <button type="button" class="map-expand-button" data-map-target="{{ item.id }}">Full screen</button>
+            </div>
           </div>
           <div class="map" id="{{ item.id }}"></div>
           <div class="legend legend-below">
@@ -137,9 +144,45 @@
   </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/html-to-image@1.11.11/dist/html-to-image.js"></script>
   <script>
     const mapConfigs = {{ maps_json|safe }};
     const mapInstances = [];
+
+    function slugify(value) {
+      return (value || "map")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "map";
+    }
+
+    async function downloadMapCard(button) {
+      const card = button.closest(".map-card");
+      if (!card || !window.htmlToImage) {
+        return;
+      }
+
+      const originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = "Preparing...";
+
+      try {
+        const dataUrl = await window.htmlToImage.toPng(card, {
+          cacheBust: true,
+          pixelRatio: 2,
+          filter: (node) => !(node.classList && node.classList.contains("map-card-actions"))
+        });
+        const link = document.createElement("a");
+        link.href = dataUrl;
+        link.download = `${slugify(button.dataset.mapTitle)}.png`;
+        link.click();
+      } catch (error) {
+        window.alert("Map image export failed in this browser. The point CSV download is still available.");
+      } finally {
+        button.disabled = false;
+        button.textContent = originalLabel;
+      }
+    }
 
     function invalidateMapLayout(map) {
       window.setTimeout(() => map.invalidateSize(), 150);
@@ -175,10 +218,12 @@
       const map = L.map(config.id);
       const streetLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
+        crossOrigin: "anonymous",
         attribution: "&copy; OpenStreetMap contributors"
       }).addTo(map);
       const satelliteLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
         maxZoom: 19,
+        crossOrigin: "anonymous",
         attribution: "Tiles &copy; Esri"
       });
 
@@ -222,6 +267,12 @@
     document.querySelectorAll(".map-expand-button").forEach((button) => {
       button.addEventListener("click", () => {
         setExpandedCard(button.closest(".map-card"));
+      });
+    });
+
+    document.querySelectorAll(".map-download-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        downloadMapCard(button);
       });
     });
 

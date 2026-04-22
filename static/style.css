@@ -98,6 +98,18 @@ h3 {
   margin-bottom: 20px;
 }
 
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.panel-header h2 {
+  margin-bottom: 0;
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -157,6 +169,18 @@ button {
 .secondary-link {
   color: var(--accent-strong);
   background: #f2faf5;
+}
+
+.compact-link,
+.map-download-button,
+.map-expand-button {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+}
+
+button:disabled {
+  opacity: 0.72;
+  cursor: wait;
 }
 
 .alert {
@@ -283,14 +307,24 @@ button {
   border-bottom: 1px solid #e1ebe2;
 }
 
+.map-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .map-expand-button {
   border: 1px solid #b7cabd;
   border-radius: 999px;
   background: #f6fbf7;
   color: var(--accent-strong);
-  padding: 8px 12px;
-  font-size: 0.82rem;
   font-weight: 600;
+}
+
+.map-download-button {
+  border: 1px solid var(--accent);
+  border-radius: 999px;
 }
 
 .legend {
@@ -366,6 +400,11 @@ body.map-overlay-open {
   }
 
   .map-card-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .panel-header {
     align-items: flex-start;
     flex-direction: column;
   }
