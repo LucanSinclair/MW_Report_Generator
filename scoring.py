@@ -8,7 +8,7 @@ import re
 import zipfile
 from collections import Counter
 from dataclasses import dataclass
-from statistics import mean
+from statistics import mean, median
 from typing import Any
 from xml.etree import ElementTree as ET
 
@@ -644,6 +644,17 @@ def _mean_or_none(values: list[float]) -> float | None:
     return mean(values)
 
 
+def _raw_summary(values: list[float]) -> dict[str, float | None]:
+    if not values:
+        return {"mean": None, "median": None, "min": None, "max": None}
+    return {
+        "mean": mean(values),
+        "median": median(values),
+        "min": min(values),
+        "max": max(values),
+    }
+
+
 def _band_grade(score: float | None) -> str | None:
     if score is None:
         return None
@@ -815,6 +826,7 @@ def _score_group(
     rows_50m: list[dict[str, Any]],
 ) -> dict[str, Any]:
     presence_values, presence_rows = _presence_points(rows_10m, "Mangrove_Presence_10m")
+    cover_raw_values = [value * 100.0 for value in presence_values]
     cover_percent = None
     if presence_values:
         cover_percent = (sum(1 for value in presence_values if value == 1) / len(presence_values)) * 100.0
@@ -856,6 +868,14 @@ def _score_group(
     condition_mean = _mean_or_none(condition_values)
     damage_raw = _weighted_impact_raw(damage_classes, {1: 1.0, 2: 1.5, 3: 2.0})
     modification_raw = _weighted_impact_raw(modification_classes, {1: 0.5, 2: 1.0})
+    raw_summaries = {
+        "cover": _raw_summary(cover_raw_values),
+        "density": _raw_summary(density_values),
+        "maturity": _raw_summary(maturity_values),
+        "condition": _raw_summary(condition_values),
+        "damage": _raw_summary([float(value) for value in damage_classes]),
+        "modification": _raw_summary([float(value) for value in modification_classes]),
+    }
 
     cover_score = standardize_cover(cover_percent)
     density_score = standardize_density_or_maturity(density_mean)
@@ -890,6 +910,7 @@ def _score_group(
                 ),
                 "score": cover_score,
                 "score_grade": _band_grade(cover_score),
+                "raw_summary": raw_summaries["cover"],
             },
             "density": {
                 "raw": density_mean,
@@ -899,6 +920,7 @@ def _score_group(
                 ),
                 "score": density_score,
                 "score_grade": _band_grade(density_score),
+                "raw_summary": raw_summaries["density"],
             },
             "maturity": {
                 "raw": maturity_mean,
@@ -908,6 +930,7 @@ def _score_group(
                 ),
                 "score": maturity_score,
                 "score_grade": _band_grade(maturity_score),
+                "raw_summary": raw_summaries["maturity"],
             },
             "condition": {
                 "raw": condition_mean,
@@ -917,6 +940,7 @@ def _score_group(
                 ),
                 "score": condition_score,
                 "score_grade": _band_grade(condition_score),
+                "raw_summary": raw_summaries["condition"],
             },
             "damage": {
                 "raw": damage_raw,
@@ -926,6 +950,7 @@ def _score_group(
                 ),
                 "score": damage_score,
                 "score_grade": _band_grade(damage_score),
+                "raw_summary": raw_summaries["damage"],
             },
             "modification": {
                 "raw": modification_raw,
@@ -935,6 +960,7 @@ def _score_group(
                 ),
                 "score": modification_score,
                 "score_grade": _band_grade(modification_score),
+                "raw_summary": raw_summaries["modification"],
             },
             "structure": {
                 "raw": None,
@@ -1154,9 +1180,34 @@ def report_table_csv(report: dict[str, Any]) -> str:
         "Impact Grade",
         "Indicator Score",
         "Indicator Grade",
+        "Cover Raw Mean",
+        "Cover Raw Median",
+        "Cover Raw Min",
+        "Cover Raw Max",
+        "Density Raw Mean",
+        "Density Raw Median",
+        "Density Raw Min",
+        "Density Raw Max",
+        "Maturity Raw Mean",
+        "Maturity Raw Median",
+        "Maturity Raw Min",
+        "Maturity Raw Max",
+        "Condition Raw Mean",
+        "Condition Raw Median",
+        "Condition Raw Min",
+        "Condition Raw Max",
+        "Damage Raw Mean",
+        "Damage Raw Median",
+        "Damage Raw Min",
+        "Damage Raw Max",
+        "Modification Raw Mean",
+        "Modification Raw Median",
+        "Modification Raw Min",
+        "Modification Raw Max",
     ]
     rows = []
-    for row in report["table_rows"]:
+    for score_row, row in zip(report["score_rows"], report["table_rows"], strict=False):
+        metrics = score_row["metrics"]
         rows.append(
             {
                 "Result": row["label"],
@@ -1180,6 +1231,30 @@ def report_table_csv(report: dict[str, Any]) -> str:
                 "Impact Grade": row["impact_grade"],
                 "Indicator Score": row["indicator_score"],
                 "Indicator Grade": row["indicator_grade"],
+                "Cover Raw Mean": _format_number(metrics["cover"]["raw_summary"]["mean"]),
+                "Cover Raw Median": _format_number(metrics["cover"]["raw_summary"]["median"]),
+                "Cover Raw Min": _format_number(metrics["cover"]["raw_summary"]["min"]),
+                "Cover Raw Max": _format_number(metrics["cover"]["raw_summary"]["max"]),
+                "Density Raw Mean": _format_number(metrics["density"]["raw_summary"]["mean"]),
+                "Density Raw Median": _format_number(metrics["density"]["raw_summary"]["median"]),
+                "Density Raw Min": _format_number(metrics["density"]["raw_summary"]["min"]),
+                "Density Raw Max": _format_number(metrics["density"]["raw_summary"]["max"]),
+                "Maturity Raw Mean": _format_number(metrics["maturity"]["raw_summary"]["mean"]),
+                "Maturity Raw Median": _format_number(metrics["maturity"]["raw_summary"]["median"]),
+                "Maturity Raw Min": _format_number(metrics["maturity"]["raw_summary"]["min"]),
+                "Maturity Raw Max": _format_number(metrics["maturity"]["raw_summary"]["max"]),
+                "Condition Raw Mean": _format_number(metrics["condition"]["raw_summary"]["mean"]),
+                "Condition Raw Median": _format_number(metrics["condition"]["raw_summary"]["median"]),
+                "Condition Raw Min": _format_number(metrics["condition"]["raw_summary"]["min"]),
+                "Condition Raw Max": _format_number(metrics["condition"]["raw_summary"]["max"]),
+                "Damage Raw Mean": _format_number(metrics["damage"]["raw_summary"]["mean"]),
+                "Damage Raw Median": _format_number(metrics["damage"]["raw_summary"]["median"]),
+                "Damage Raw Min": _format_number(metrics["damage"]["raw_summary"]["min"]),
+                "Damage Raw Max": _format_number(metrics["damage"]["raw_summary"]["max"]),
+                "Modification Raw Mean": _format_number(metrics["modification"]["raw_summary"]["mean"]),
+                "Modification Raw Median": _format_number(metrics["modification"]["raw_summary"]["median"]),
+                "Modification Raw Min": _format_number(metrics["modification"]["raw_summary"]["min"]),
+                "Modification Raw Max": _format_number(metrics["modification"]["raw_summary"]["max"]),
             }
         )
     return _csv_text(fieldnames, rows)
