@@ -30,6 +30,10 @@
 
     <section class="panel summary-strip">
       <div>
+        <span class="summary-label">Assessment year</span>
+        <strong>{{ report.assessment_year if report.assessment_year else 'N/A' }}</strong>
+      </div>
+      <div>
         <span class="summary-label">Selected sections</span>
         <strong>{{ report.selected_section_label }}</strong>
       </div>
@@ -44,6 +48,41 @@
       <div>
         <span class="summary-label">Output mode</span>
         <strong>{{ report.output_mode }}</strong>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Indicator Mapping</h2>
+      </div>
+      <p class="table-note">
+        This table shows the workbook or CSV columns the app used for each reported indicator.
+      </p>
+      <div class="mapping-meta">
+        {% if report.sheet_names %}
+        <p><strong>10 m source:</strong> {{ report.sheet_names.get('10m', 'N/A') }}</p>
+        <p><strong>50 m source:</strong> {{ report.sheet_names.get('50m', 'N/A') }}</p>
+        {% endif %}
+      </div>
+      <div class="table-wrap">
+        <table class="mapping-table">
+          <thead>
+            <tr>
+              <th>Indicator</th>
+              <th>Used For</th>
+              <th>Source Columns</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in report.indicator_mapping %}
+            <tr>
+              <td>{{ item.indicator }}</td>
+              <td>{{ item.used_for }}</td>
+              <td>{{ item.source_columns }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </section>
 

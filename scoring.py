@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import math
+import re
 import zipfile
 from collections import Counter
 from dataclasses import dataclass
@@ -20,10 +21,35 @@ MAIN_NS = f"{{{NS['main']}}}"
 
 
 NUMERIC_NA = {"", "N", "NA", "None", "null"}
-REQUIRED_HEADERS_10M = {"id_10m", "Section", "Assessed25", "Mangrove_Presence_25", "Naturalness25", "Physical_Damage25"}
-REQUIRED_HEADERS_50M = {"id_10m", "Section", "Assessed25", "Mangrove_Presence25_50", "Density25", "Maturity25", "Condition_Score25"}
 HEADER_ALIASES = {
     "ReportCard": "Section",
+}
+SHEET_SCHEMAS = {
+    "10m": {
+        "static_fields": {
+            "id_10m": ("id_10m",),
+            "Section": ("Section",),
+        },
+        "year_fields": {
+            "Assessed": ("Assessed{yy}",),
+            "Mangrove_Presence_10m": ("Mangrove_Presence_{yy}", "Mangrove_Presence{yy}"),
+            "Naturalness": ("Naturalness{yy}",),
+            "Physical_Damage": ("Physical_Damage{yy}",),
+        },
+    },
+    "50m": {
+        "static_fields": {
+            "id_10m": ("id_10m",),
+            "Section": ("Section",),
+        },
+        "year_fields": {
+            "Assessed": ("Assessed{yy}",),
+            "Mangrove_Presence_50m": ("Mangrove_Presence{yy}_50", "Mangrove_Presence_{yy}_50"),
+            "Density": ("Density{yy}",),
+            "Maturity": ("Maturity{yy}",),
+            "Condition_Score": ("Condition_Score{yy}",),
+        },
+    },
 }
 
 
@@ -152,9 +178,113 @@ def _column_name(cell_ref: str) -> str:
     return "".join(ch for ch in cell_ref if ch.isalpha())
 
 
-def _normalize_header(value: str) -> str:
+def _normalize_header(value: str, available_headers: set[str] | None = None) -> str:
     text = _clean(value)
+    if text == "ReportCard" and available_headers and "Section" in available_headers:
+        return text
     return HEADER_ALIASES.get(text, text)
+
+
+def _candidate_years(headers: set[str]) -> list[str]:
+    years = set()
+    for header in headers:
+        for match in re.finditer(r"(?<!\d)(\d{2})(?!\d)", header):
+            years.add(match.group(1))
+    return sorted(years, key=int, reverse=True)
+
+
+def _header_match(headers: set[str], candidates: tuple[str, ...]) -> str | None:
+    for candidate in candidates:
+        if candidate in headers:
+            return candidate
+    return None
+
+
+def _schema_field_map(headers: set[str], schema_name: str) -> dict[str, Any] | None:
+    schema = SHEET_SCHEMAS[schema_name]
+    field_map: dict[str, str] = {}
+
+    for canonical, candidates in schema["static_fields"].items():
+        header = _header_match(headers, candidates)
+        if header is None:
+            return None
+        field_map[canonical] = header
+
+    for year_suffix in _candidate_years(headers):
+        year_field_map = dict(field_map)
+        for canonical, templates in schema["year_fields"].items():
+            header = _header_match(headers, tuple(template.format(yy=year_suffix) for template in templates))
+            if header is None:
+                break
+            year_field_map[canonical] = header
+        else:
+            return {
+                "sheet_type": schema_name,
+                "assessment_year": 2000 + int(year_suffix),
+                "field_map": year_field_map,
+            }
+
+    return None
+
+
+def _normalize_rows(rows: list[dict[str, str]], field_map: dict[str, str]) -> list[dict[str, str]]:
+    normalized_rows = []
+    for row in rows:
+        normalized = dict(row)
+        for canonical, actual in field_map.items():
+            normalized[canonical] = row.get(actual, "")
+        normalized_rows.append(normalized)
+    return normalized_rows
+
+
+def _indicator_mapping(metadata: dict[str, Any]) -> list[dict[str, str]]:
+    fields_10m = metadata["field_maps"]["10m"]["field_map"]
+    fields_50m = metadata["field_maps"]["50m"]["field_map"]
+    return [
+        {
+            "indicator": "Section Grouping",
+            "used_for": "By-section rows and map labels",
+            "source_columns": (
+                f'10 m: {fields_10m["Section"]}; '
+                f'50 m: {fields_50m["Section"]} with 10 m section backfill by id_10m when present'
+            ),
+        },
+        {
+            "indicator": "%Cover",
+            "used_for": "Cover score and cover grade",
+            "source_columns": f'10 m: {fields_10m["Mangrove_Presence_10m"]}',
+        },
+        {
+            "indicator": "Density",
+            "used_for": "Density score and grade",
+            "source_columns": f'50 m: {fields_50m["Density"]}',
+        },
+        {
+            "indicator": "Maturity",
+            "used_for": "Maturity score and grade",
+            "source_columns": f'50 m: {fields_50m["Maturity"]}',
+        },
+        {
+            "indicator": "Condition / Canopy Cover",
+            "used_for": "Condition score, canopy cover score, and grades",
+            "source_columns": f'50 m: {fields_50m["Condition_Score"]}',
+        },
+        {
+            "indicator": "Mangrove Damage",
+            "used_for": "Damage score and grade",
+            "source_columns": f'10 m: {fields_10m["Physical_Damage"]}',
+        },
+        {
+            "indicator": "Shoreline Modification",
+            "used_for": "Modification score and grade",
+            "source_columns": f'10 m: {fields_10m["Naturalness"]}',
+        },
+        {
+            "indicator": "Assessed Filter",
+            "used_for": "Rows included in the report",
+            "source_columns": f'10 m: {fields_10m["Assessed"]}; 50 m: {fields_50m["Assessed"]}',
+        },
+    ]
 
 
 def _sheet_xml_path_by_name(zf: zipfile.ZipFile) -> dict[str, str]:
@@ -193,7 +323,9 @@ def _sheet_headers(
     fallback_row = 0
     fallback_headers: dict[str, str] = {}
     for row_number, values in _iter_sheet_rows(zf, sheet_path, shared):
-        headers = {column: _normalize_header(value) for column, value in values.items() if _clean(value)}
+        raw_headers = {column: _clean(value) for column, value in values.items() if _clean(value)}
+        available_headers = set(raw_headers.values())
+        headers = {column: _normalize_header(value, available_headers) for column, value in raw_headers.items()}
         if not headers:
             continue
         if row_number == 3:
@@ -219,14 +351,36 @@ def _sheet_header_set(
     return set(headers.values())
 
 
+def _sheet_match_info(zf: zipfile.ZipFile, sheet_path: str, shared: list[str], schema_name: str) -> dict[str, Any] | None:
+    for row_number, values in _iter_sheet_rows(zf, sheet_path, shared):
+        raw_headers = {column: _clean(value) for column, value in values.items() if _clean(value)}
+        available_headers = set(raw_headers.values())
+        headers_by_col = {column: _normalize_header(value, available_headers) for column, value in raw_headers.items()}
+        if not headers_by_col:
+            continue
+        match = _schema_field_map(set(headers_by_col.values()), schema_name)
+        if match is not None:
+            return {
+                "header_row": row_number,
+                "headers_by_col": headers_by_col,
+                "match": match,
+            }
+        if row_number >= 10:
+            break
+    return None
+
+
 def _read_sheet_rows(
     zf: zipfile.ZipFile,
     sheet_path: str,
     shared: list[str],
     expected_headers: set[str] | None = None,
+    header_row: int | None = None,
+    header_by_col: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
-    header_row, header_by_col = _sheet_headers(zf, sheet_path, shared, expected_headers=expected_headers)
+    if header_row is None or header_by_col is None:
+        header_row, header_by_col = _sheet_headers(zf, sheet_path, shared, expected_headers=expected_headers)
     if not header_row or not header_by_col:
         return rows
     for row_number, values in _iter_sheet_rows(zf, sheet_path, shared):
@@ -245,34 +399,32 @@ def _find_sheet(sheet_map: dict[str, str], expected_headers: set[str]) -> str:
     return ""
 
 
-def _sheet_with_headers(zf: zipfile.ZipFile, expected_headers: set[str], shared: list[str]) -> str:
+def _sheet_with_headers(zf: zipfile.ZipFile, schema_name: str, shared: list[str]) -> tuple[str, dict[str, Any]]:
     for _, path in _sheet_xml_path_by_name(zf).items():
-        headers = _sheet_header_set(zf, path, shared, expected_headers=expected_headers)
-        if not headers:
-            continue
-        if expected_headers.issubset(headers):
-            return path
-    raise ReportError(f"Could not find worksheet with headers: {sorted(expected_headers)}")
+        info = _sheet_match_info(zf, path, shared, schema_name)
+        if info is not None:
+            return path, info
+    raise ReportError(f'Could not find worksheet matching the required {schema_name} headers.')
 
 
 def _selected_sheet_path(
     zf: zipfile.ZipFile,
     shared: list[str],
-    expected_headers: set[str],
+    schema_name: str,
     selected_name: str | None,
     label: str,
-) -> str:
+) -> tuple[str, dict[str, Any]]:
     sheet_map = _sheet_xml_path_by_name(zf)
     if not selected_name:
-        return _sheet_with_headers(zf, expected_headers, shared)
+        return _sheet_with_headers(zf, schema_name, shared)
     if selected_name not in sheet_map:
         raise ReportError(f'Selected {label} sheet "{selected_name}" was not found in the workbook.')
 
     sheet_path = sheet_map[selected_name]
-    headers = _sheet_header_set(zf, sheet_path, shared, expected_headers=expected_headers)
-    if not expected_headers.issubset(headers):
+    info = _sheet_match_info(zf, sheet_path, shared, schema_name)
+    if info is None:
         raise ReportError(f'Selected {label} sheet "{selected_name}" does not contain the required headers.')
-    return sheet_path
+    return sheet_path, info
 
 
 def workbook_sheet_options(file_bytes: bytes) -> dict[str, Any]:
@@ -284,10 +436,8 @@ def workbook_sheet_options(file_bytes: bytes) -> dict[str, Any]:
             default_10m = ""
             default_50m = ""
             for name, path in sheet_map.items():
-                headers_10m = _sheet_header_set(zf, path, shared, expected_headers=REQUIRED_HEADERS_10M)
-                headers_50m = _sheet_header_set(zf, path, shared, expected_headers=REQUIRED_HEADERS_50M)
-                matches_10m = REQUIRED_HEADERS_10M.issubset(headers_10m)
-                matches_50m = REQUIRED_HEADERS_50M.issubset(headers_50m)
+                matches_10m = _sheet_match_info(zf, path, shared, "10m") is not None
+                matches_50m = _sheet_match_info(zf, path, shared, "50m") is not None
                 if matches_10m and not default_10m:
                     default_10m = name
                 if matches_50m and not default_50m:
@@ -316,27 +466,61 @@ def load_workbook_dataset(
     try:
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
             shared = _shared_strings(zf)
-            sheet_10m = _selected_sheet_path(
+            sheet_map = _sheet_xml_path_by_name(zf)
+            sheet_10m, info_10m = _selected_sheet_path(
                 zf,
                 shared,
-                REQUIRED_HEADERS_10M,
+                "10m",
                 _clean(sheet_10m_name),
                 "10 m",
             )
-            sheet_50m = _selected_sheet_path(
+            sheet_50m, info_50m = _selected_sheet_path(
                 zf,
                 shared,
-                REQUIRED_HEADERS_50M,
+                "50m",
                 _clean(sheet_50m_name),
                 "50 m",
             )
-            points_10m = _read_sheet_rows(zf, sheet_10m, shared, expected_headers=REQUIRED_HEADERS_10M)
-            points_50m = _read_sheet_rows(zf, sheet_50m, shared, expected_headers=REQUIRED_HEADERS_50M)
+            match_10m = info_10m["match"]
+            match_50m = info_50m["match"]
+            points_10m = _normalize_rows(
+                _read_sheet_rows(
+                    zf,
+                    sheet_10m,
+                    shared,
+                    header_row=info_10m["header_row"],
+                    header_by_col=info_10m["headers_by_col"],
+                ),
+                match_10m["field_map"],
+            )
+            points_50m = _normalize_rows(
+                _read_sheet_rows(
+                    zf,
+                    sheet_50m,
+                    shared,
+                    header_row=info_50m["header_row"],
+                    header_by_col=info_50m["headers_by_col"],
+                ),
+                match_50m["field_map"],
+            )
+            sheet_names = {
+                "10m": _clean(sheet_10m_name) or next(name for name, path in sheet_map.items() if path == sheet_10m),
+                "50m": _clean(sheet_50m_name) or next(name for name, path in sheet_map.items() if path == sheet_50m),
+            }
     except zipfile.BadZipFile as exc:
         raise ReportError(
             "Workbook upload must be an .xlsx or .xlsm file. Legacy .xls files are not supported."
         ) from exc
-    return _finalize_dataset(points_10m, points_50m, source_name=filename or "Workbook")
+    return _finalize_dataset(
+        points_10m,
+        points_50m,
+        source_name=filename or "Workbook",
+        metadata={
+            "assessment_year": min(match_10m["assessment_year"], match_50m["assessment_year"]),
+            "field_maps": {"10m": match_10m, "50m": match_50m},
+            "sheet_names": sheet_names,
+        },
+    )
 
 
 def _read_csv(file_bytes: bytes) -> list[dict[str, str]]:
@@ -348,46 +532,77 @@ def _read_csv(file_bytes: bytes) -> list[dict[str, str]]:
 def load_csv_dataset(csv_10m_bytes: bytes, csv_50m_bytes: bytes, name_10m: str = "", name_50m: str = "") -> Dataset:
     points_10m = _read_csv(csv_10m_bytes)
     points_50m = _read_csv(csv_50m_bytes)
-    if not points_10m or not REQUIRED_HEADERS_10M.issubset(points_10m[0].keys()):
-        raise ReportError(f"10m CSV must contain headers: {sorted(REQUIRED_HEADERS_10M)}")
-    if not points_50m or not REQUIRED_HEADERS_50M.issubset(points_50m[0].keys()):
-        raise ReportError(f"50m CSV must contain headers: {sorted(REQUIRED_HEADERS_50M)}")
-    return _finalize_dataset(points_10m, points_50m, source_name=f"{name_10m or '10m CSV'} + {name_50m or '50m CSV'}")
+    headers_10m = set(points_10m[0].keys()) if points_10m else set()
+    headers_50m = set(points_50m[0].keys()) if points_50m else set()
+    match_10m = _schema_field_map(headers_10m, "10m")
+    match_50m = _schema_field_map(headers_50m, "50m")
+    if not points_10m or match_10m is None:
+        raise ReportError("10m CSV does not contain the required Mangrove Watch 10 m headers.")
+    if not points_50m or match_50m is None:
+        raise ReportError("50m CSV does not contain the required Mangrove Watch 50 m headers.")
+    return _finalize_dataset(
+        _normalize_rows(points_10m, match_10m["field_map"]),
+        _normalize_rows(points_50m, match_50m["field_map"]),
+        source_name=f"{name_10m or '10m CSV'} + {name_50m or '50m CSV'}",
+        metadata={
+            "assessment_year": min(match_10m["assessment_year"], match_50m["assessment_year"]),
+            "field_maps": {"10m": match_10m, "50m": match_50m},
+            "sheet_names": {"10m": name_10m or "10m CSV", "50m": name_50m or "50m CSV"},
+        },
+    )
 
 
-def _finalize_dataset(points_10m: list[dict[str, str]], points_50m: list[dict[str, str]], source_name: str) -> Dataset:
+def _finalize_dataset(
+    points_10m: list[dict[str, str]],
+    points_50m: list[dict[str, str]],
+    source_name: str,
+    metadata: dict[str, Any] | None = None,
+) -> Dataset:
     coords_by_id: dict[str, tuple[float | None, float | None]] = {}
+    section_by_id: dict[str, str] = {}
     sections = Counter()
     for row in points_10m:
         point_id = _clean(row.get("id_10m"))
         lon = _parse_float(row.get("lon_10m_point"))
         lat = _parse_float(row.get("lat_10m_point"))
+        section = _clean(row.get("Section"))
         if point_id:
             coords_by_id[point_id] = (lon, lat)
-        if _clean(row.get("Section")):
-            sections[_clean(row.get("Section"))] += 1
+            if section:
+                section_by_id[point_id] = section
+        if section:
+            sections[section] += 1
 
     for row in points_50m:
-        if _clean(row.get("lon_10m_point")) and _clean(row.get("lat_10m_point")):
-            continue
         point_id = _clean(row.get("id_10m"))
-        if point_id in coords_by_id:
+        if point_id in coords_by_id and (not _clean(row.get("lon_10m_point")) or not _clean(row.get("lat_10m_point"))):
             lon, lat = coords_by_id[point_id]
             if lon is not None:
                 row["lon_10m_point"] = str(lon)
             if lat is not None:
                 row["lat_10m_point"] = str(lat)
+        if point_id in section_by_id:
+            row["Section"] = section_by_id[point_id]
 
     sections_available = sorted({_clean(row.get("Section")) for row in points_10m if _clean(row.get("Section"))}, key=_sort_key)
+    base_metadata = dict(metadata or {})
+    base_metadata.update(
+        {
+            "source_name": source_name,
+            "sections_available": sections_available,
+        }
+    )
+    if "indicator_mapping" not in base_metadata and "field_maps" in base_metadata:
+        base_metadata["indicator_mapping"] = _indicator_mapping(base_metadata)
     return Dataset(
         points_10m=points_10m,
         points_50m=points_50m,
-        metadata={"source_name": source_name, "sections_available": sections_available},
+        metadata=base_metadata,
     )
 
 
-def _is_assessed_2025(row: dict[str, Any]) -> bool:
-    return _clean(row.get("Assessed25")).upper() != "X"
+def _is_assessed(row: dict[str, Any]) -> bool:
+    return _clean(row.get("Assessed")).upper() != "X"
 
 
 def _filter_rows(rows: list[dict[str, Any]], sections: list[str] | None) -> list[dict[str, Any]]:
@@ -397,7 +612,7 @@ def _filter_rows(rows: list[dict[str, Any]], sections: list[str] | None) -> list
         section = _clean(row.get("Section"))
         if sections is not None and section not in section_set:
             continue
-        if not _is_assessed_2025(row):
+        if not _is_assessed(row):
             continue
         selected.append(row)
     return selected
@@ -599,7 +814,7 @@ def _score_group(
     rows_10m: list[dict[str, Any]],
     rows_50m: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    presence_values, presence_rows = _presence_points(rows_10m, "Mangrove_Presence_25")
+    presence_values, presence_rows = _presence_points(rows_10m, "Mangrove_Presence_10m")
     cover_percent = None
     if presence_values:
         cover_percent = (sum(1 for value in presence_values if value == 1) / len(presence_values)) * 100.0
@@ -608,11 +823,11 @@ def _score_group(
     maturity_values: list[float] = []
     condition_values: list[float] = []
     for row in rows_50m:
-        if _presence_class(row.get("Mangrove_Presence25_50")) != 1:
+        if _presence_class(row.get("Mangrove_Presence_50m")) != 1:
             continue
-        density = _parse_float(row.get("Density25"))
-        maturity = _parse_float(row.get("Maturity25"))
-        condition = _parse_float(row.get("Condition_Score25"))
+        density = _parse_float(row.get("Density"))
+        maturity = _parse_float(row.get("Maturity"))
+        condition = _parse_float(row.get("Condition_Score"))
         if density is not None:
             density_values.append(density)
         if maturity is not None:
@@ -622,16 +837,16 @@ def _score_group(
 
     damage_classes: list[int] = []
     for row in rows_10m:
-        if _presence_class(row.get("Mangrove_Presence_25")) != 1:
+        if _presence_class(row.get("Mangrove_Presence_10m")) != 1:
             continue
-        damage = _parse_int(row.get("Physical_Damage25"))
+        damage = _parse_int(row.get("Physical_Damage"))
         if damage is None:
             continue
         damage_classes.append(max(0, min(damage, 3)))
 
     modification_classes: list[int] = []
     for row in rows_10m:
-        modification = _modification_class(row.get("Naturalness25"))
+        modification = _modification_class(row.get("Naturalness"))
         if modification is None:
             continue
         modification_classes.append(modification)
@@ -750,9 +965,9 @@ def _map_points_10m(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         lat = _parse_float(row.get("lat_10m_point"))
         if lon is None or lat is None:
             continue
-        presence = _presence_class(row.get("Mangrove_Presence_25"))
-        damage = _parse_int(row.get("Physical_Damage25"))
-        modification = _modification_class(row.get("Naturalness25"))
+        presence = _presence_class(row.get("Mangrove_Presence_10m"))
+        damage = _parse_int(row.get("Physical_Damage"))
+        modification = _modification_class(row.get("Naturalness"))
         base = {
             "lat": lat,
             "lon": lon,
@@ -781,9 +996,9 @@ def _map_points_50m(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "section": _clean(row.get("Section")),
             "point_id": _clean(row.get("id_10m")),
         }
-        density = _parse_int(row.get("Density25"))
-        maturity = _parse_int(row.get("Maturity25"))
-        condition = _parse_int(row.get("Condition_Score25"))
+        density = _parse_int(row.get("Density"))
+        maturity = _parse_int(row.get("Maturity"))
+        condition = _parse_int(row.get("Condition_Score"))
         if density is not None:
             points.append({**base, "metric": "density", "value": max(1, min(density, 4))})
         if maturity is not None:
@@ -865,7 +1080,8 @@ def generate_report(dataset: Dataset, sections: list[str] | None = None, output_
     rows_10m = _filter_rows(dataset.points_10m, sections)
     rows_50m = _filter_rows(dataset.points_50m, sections)
     if not rows_10m and not rows_50m:
-        raise ReportError("No assessed 2025 rows remain after filtering. Check the section selection and Assessed25 values.")
+        year = dataset.metadata.get("assessment_year", "selected")
+        raise ReportError(f"No assessed {year} rows remain after filtering. Check the section selection and assessed values.")
 
     available_sections = sorted({_clean(row.get("Section")) for row in rows_10m if _clean(row.get("Section"))}, key=_sort_key)
 
@@ -885,6 +1101,9 @@ def generate_report(dataset: Dataset, sections: list[str] | None = None, output_
     return {
         "source_name": dataset.metadata["source_name"],
         "sections_available": dataset.metadata["sections_available"],
+        "assessment_year": dataset.metadata.get("assessment_year"),
+        "sheet_names": dataset.metadata.get("sheet_names", {}),
+        "indicator_mapping": dataset.metadata.get("indicator_mapping", []),
         "selected_sections": sections or dataset.metadata["sections_available"],
         "selected_section_label": _section_label(sections),
         "output_mode": output_mode,
