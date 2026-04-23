@@ -27,9 +27,26 @@
         <div class="field-grid">
           <label class="field">
             <span>Workbook upload</span>
-            <input type="file" name="workbook" accept=".xlsm,.xlsx">
-            <small>Preferred. The app auto-detects the 2025 10 m and 50 m sheets.</small>
+            <input type="file" name="workbook" id="workbook-input" accept=".xlsm,.xlsx">
+            <small>Preferred. The app can auto-detect the 10 m and 50 m sheets, or you can override them below.</small>
           </label>
+
+          <div class="field sheet-picker is-hidden" id="sheet-picker">
+            <span>Workbook sheets</span>
+            <p class="field-note" id="sheet-picker-status">Choose a workbook to inspect its sheets.</p>
+            <label class="field subfield">
+              <span>10 m sheet</span>
+              <select name="workbook_sheet_10m" id="workbook-sheet-10m" disabled>
+                <option value="">Auto-detect 10 m sheet</option>
+              </select>
+            </label>
+            <label class="field subfield">
+              <span>50 m sheet</span>
+              <select name="workbook_sheet_50m" id="workbook-sheet-50m" disabled>
+                <option value="">Auto-detect 50 m sheet</option>
+              </select>
+            </label>
+          </div>
 
           <label class="field">
             <span>10 m CSV upload</span>
@@ -67,5 +84,84 @@
       </form>
     </section>
   </main>
+
+  <script>
+    const workbookInput = document.getElementById("workbook-input");
+    const sheetPicker = document.getElementById("sheet-picker");
+    const sheetPickerStatus = document.getElementById("sheet-picker-status");
+    const sheet10mSelect = document.getElementById("workbook-sheet-10m");
+    const sheet50mSelect = document.getElementById("workbook-sheet-50m");
+
+    function resetSheetSelect(select, placeholder) {
+      select.innerHTML = "";
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = placeholder;
+      select.appendChild(option);
+      select.disabled = true;
+    }
+
+    function optionLabel(sheet) {
+      const tags = [];
+      if (sheet.matches_10m) tags.push("10 m match");
+      if (sheet.matches_50m) tags.push("50 m match");
+      return tags.length ? `${sheet.name} (${tags.join(", ")})` : sheet.name;
+    }
+
+    function fillSheetSelect(select, sheets, selectedName, placeholder) {
+      resetSheetSelect(select, placeholder);
+      sheets.forEach((sheet) => {
+        const option = document.createElement("option");
+        option.value = sheet.name;
+        option.textContent = optionLabel(sheet);
+        option.selected = sheet.name === selectedName;
+        select.appendChild(option);
+      });
+      select.disabled = false;
+    }
+
+    async function inspectWorkbook(file) {
+      resetSheetSelect(sheet10mSelect, "Auto-detect 10 m sheet");
+      resetSheetSelect(sheet50mSelect, "Auto-detect 50 m sheet");
+
+      if (!file) {
+        sheetPicker.classList.add("is-hidden");
+        sheetPickerStatus.textContent = "Choose a workbook to inspect its sheets.";
+        return;
+      }
+
+      sheetPicker.classList.remove("is-hidden");
+      sheetPickerStatus.textContent = "Inspecting workbook sheets...";
+
+      const formData = new FormData();
+      formData.append("workbook", file);
+
+      try {
+        const response = await fetch("{{ url_for('workbook_sheets') }}", {
+          method: "POST",
+          body: formData
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || "Could not inspect workbook sheets.");
+        }
+
+        fillSheetSelect(sheet10mSelect, payload.sheets, payload.default_10m, "Auto-detect 10 m sheet");
+        fillSheetSelect(sheet50mSelect, payload.sheets, payload.default_50m, "Auto-detect 50 m sheet");
+
+        if (payload.default_10m || payload.default_50m) {
+          sheetPickerStatus.textContent = "Detected workbook sheets. Leave as-is or choose different sheets.";
+        } else {
+          sheetPickerStatus.textContent = "No obvious 10 m / 50 m match was found. Pick the sheets manually.";
+        }
+      } catch (error) {
+        sheetPickerStatus.textContent = error.message;
+      }
+    }
+
+    workbookInput.addEventListener("change", () => {
+      inspectWorkbook(workbookInput.files[0]);
+    });
+  </script>
 </body>
 </html>

@@ -7,7 +7,7 @@ import uuid
 from collections import OrderedDict
 from typing import Any
 
-from flask import Flask, Response, abort, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
 
 from scoring import (
     ReportError,
@@ -18,6 +18,7 @@ from scoring import (
     maps_json,
     parse_sections,
     report_table_csv,
+    workbook_sheet_options,
 )
 
 
@@ -65,6 +66,20 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/workbook-sheets", methods=["POST"])
+def workbook_sheets():
+    workbook = request.files.get("workbook")
+    if workbook is None or not workbook.filename:
+        return jsonify({"error": "Choose a workbook file first."}), 400
+
+    try:
+        options = workbook_sheet_options(workbook.read())
+    except ReportError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(options)
+
+
 @app.route("/report", methods=["GET", "POST"])
 def report():
     if request.method == "GET":
@@ -72,13 +87,20 @@ def report():
 
     sections = parse_sections(request.form.get("sections", "all"))
     output_mode = request.form.get("output_mode", "both")
+    workbook_sheet_10m = request.form.get("workbook_sheet_10m", "")
+    workbook_sheet_50m = request.form.get("workbook_sheet_50m", "")
     workbook = request.files.get("workbook")
     csv_10m = request.files.get("csv_10m")
     csv_50m = request.files.get("csv_50m")
 
     try:
         if workbook and workbook.filename:
-            dataset = load_workbook_dataset(workbook.read(), workbook.filename)
+            dataset = load_workbook_dataset(
+                workbook.read(),
+                workbook.filename,
+                sheet_10m_name=workbook_sheet_10m,
+                sheet_50m_name=workbook_sheet_50m,
+            )
         elif csv_10m and csv_10m.filename and csv_50m and csv_50m.filename:
             dataset = load_csv_dataset(csv_10m.read(), csv_50m.read(), csv_10m.filename, csv_50m.filename)
         else:

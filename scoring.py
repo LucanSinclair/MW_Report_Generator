@@ -20,6 +20,11 @@ MAIN_NS = f"{{{NS['main']}}}"
 
 
 NUMERIC_NA = {"", "N", "NA", "None", "null"}
+REQUIRED_HEADERS_10M = {"id_10m", "Section", "Assessed25", "Mangrove_Presence_25", "Naturalness25", "Physical_Damage25"}
+REQUIRED_HEADERS_50M = {"id_10m", "Section", "Assessed25", "Mangrove_Presence25_50", "Density25", "Maturity25", "Condition_Score25"}
+HEADER_ALIASES = {
+    "ReportCard": "Section",
+}
 
 
 PRESENCE_LEGEND = [
@@ -147,6 +152,11 @@ def _column_name(cell_ref: str) -> str:
     return "".join(ch for ch in cell_ref if ch.isalpha())
 
 
+def _normalize_header(value: str) -> str:
+    text = _clean(value)
+    return HEADER_ALIASES.get(text, text)
+
+
 def _sheet_xml_path_by_name(zf: zipfile.ZipFile) -> dict[str, str]:
     workbook = ET.fromstring(zf.read("xl/workbook.xml"))
     rels = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
@@ -174,23 +184,53 @@ def _iter_sheet_rows(zf: zipfile.ZipFile, sheet_path: str, shared: list[str]):
             row.clear()
 
 
-def _sheet_headers(zf: zipfile.ZipFile, sheet_path: str, shared: list[str]) -> dict[str, str]:
+def _sheet_headers(
+    zf: zipfile.ZipFile,
+    sheet_path: str,
+    shared: list[str],
+    expected_headers: set[str] | None = None,
+) -> tuple[int, dict[str, str]]:
+    fallback_row = 0
+    fallback_headers: dict[str, str] = {}
     for row_number, values in _iter_sheet_rows(zf, sheet_path, shared):
-        if row_number == 3:
-            return values
-        if row_number > 3:
-            break
-    return {}
-
-
-def _read_sheet_rows(zf: zipfile.ZipFile, sheet_path: str, shared: list[str]) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    header_by_col: dict[str, str] = {}
-    for row_number, values in _iter_sheet_rows(zf, sheet_path, shared):
-        if row_number == 3:
-            header_by_col = values
+        headers = {column: _normalize_header(value) for column, value in values.items() if _clean(value)}
+        if not headers:
             continue
-        if row_number < 4:
+        if row_number == 3:
+            fallback_row = row_number
+            fallback_headers = headers
+        elif not fallback_row:
+            fallback_row = row_number
+            fallback_headers = headers
+        if expected_headers is not None and expected_headers.issubset(set(headers.values())):
+            return row_number, headers
+        if row_number >= 10:
+            break
+    return fallback_row, fallback_headers
+
+
+def _sheet_header_set(
+    zf: zipfile.ZipFile,
+    sheet_path: str,
+    shared: list[str],
+    expected_headers: set[str] | None = None,
+) -> set[str]:
+    _, headers = _sheet_headers(zf, sheet_path, shared, expected_headers=expected_headers)
+    return set(headers.values())
+
+
+def _read_sheet_rows(
+    zf: zipfile.ZipFile,
+    sheet_path: str,
+    shared: list[str],
+    expected_headers: set[str] | None = None,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    header_row, header_by_col = _sheet_headers(zf, sheet_path, shared, expected_headers=expected_headers)
+    if not header_row or not header_by_col:
+        return rows
+    for row_number, values in _iter_sheet_rows(zf, sheet_path, shared):
+        if row_number <= header_row:
             continue
         record = {header_by_col.get(column, column): value for column, value in values.items()}
         if any(_clean(value) for value in record.values()):
@@ -207,7 +247,7 @@ def _find_sheet(sheet_map: dict[str, str], expected_headers: set[str]) -> str:
 
 def _sheet_with_headers(zf: zipfile.ZipFile, expected_headers: set[str], shared: list[str]) -> str:
     for _, path in _sheet_xml_path_by_name(zf).items():
-        headers = set(_sheet_headers(zf, path, shared).values())
+        headers = _sheet_header_set(zf, path, shared, expected_headers=expected_headers)
         if not headers:
             continue
         if expected_headers.issubset(headers):
@@ -215,22 +255,83 @@ def _sheet_with_headers(zf: zipfile.ZipFile, expected_headers: set[str], shared:
     raise ReportError(f"Could not find worksheet with headers: {sorted(expected_headers)}")
 
 
-def load_workbook_dataset(file_bytes: bytes, filename: str = "") -> Dataset:
+def _selected_sheet_path(
+    zf: zipfile.ZipFile,
+    shared: list[str],
+    expected_headers: set[str],
+    selected_name: str | None,
+    label: str,
+) -> str:
+    sheet_map = _sheet_xml_path_by_name(zf)
+    if not selected_name:
+        return _sheet_with_headers(zf, expected_headers, shared)
+    if selected_name not in sheet_map:
+        raise ReportError(f'Selected {label} sheet "{selected_name}" was not found in the workbook.')
+
+    sheet_path = sheet_map[selected_name]
+    headers = _sheet_header_set(zf, sheet_path, shared, expected_headers=expected_headers)
+    if not expected_headers.issubset(headers):
+        raise ReportError(f'Selected {label} sheet "{selected_name}" does not contain the required headers.')
+    return sheet_path
+
+
+def workbook_sheet_options(file_bytes: bytes) -> dict[str, Any]:
     try:
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
             shared = _shared_strings(zf)
-            sheet_10m = _sheet_with_headers(
+            sheet_map = _sheet_xml_path_by_name(zf)
+            sheets = []
+            default_10m = ""
+            default_50m = ""
+            for name, path in sheet_map.items():
+                headers_10m = _sheet_header_set(zf, path, shared, expected_headers=REQUIRED_HEADERS_10M)
+                headers_50m = _sheet_header_set(zf, path, shared, expected_headers=REQUIRED_HEADERS_50M)
+                matches_10m = REQUIRED_HEADERS_10M.issubset(headers_10m)
+                matches_50m = REQUIRED_HEADERS_50M.issubset(headers_50m)
+                if matches_10m and not default_10m:
+                    default_10m = name
+                if matches_50m and not default_50m:
+                    default_50m = name
+                sheets.append(
+                    {
+                        "name": name,
+                        "matches_10m": matches_10m,
+                        "matches_50m": matches_50m,
+                    }
+                )
+    except zipfile.BadZipFile as exc:
+        raise ReportError(
+            "Workbook upload must be an .xlsx or .xlsm file. Legacy .xls files are not supported."
+        ) from exc
+
+    return {"sheets": sheets, "default_10m": default_10m, "default_50m": default_50m}
+
+
+def load_workbook_dataset(
+    file_bytes: bytes,
+    filename: str = "",
+    sheet_10m_name: str | None = None,
+    sheet_50m_name: str | None = None,
+) -> Dataset:
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            shared = _shared_strings(zf)
+            sheet_10m = _selected_sheet_path(
                 zf,
-                {"id_10m", "Section", "Assessed25", "Mangrove_Presence_25", "Naturalness25", "Physical_Damage25"},
                 shared,
+                REQUIRED_HEADERS_10M,
+                _clean(sheet_10m_name),
+                "10 m",
             )
-            sheet_50m = _sheet_with_headers(
+            sheet_50m = _selected_sheet_path(
                 zf,
-                {"id_10m", "Section", "Assessed25", "Mangrove_Presence25_50", "Density25", "Maturity25", "Condition_Score25"},
                 shared,
+                REQUIRED_HEADERS_50M,
+                _clean(sheet_50m_name),
+                "50 m",
             )
-            points_10m = _read_sheet_rows(zf, sheet_10m, shared)
-            points_50m = _read_sheet_rows(zf, sheet_50m, shared)
+            points_10m = _read_sheet_rows(zf, sheet_10m, shared, expected_headers=REQUIRED_HEADERS_10M)
+            points_50m = _read_sheet_rows(zf, sheet_50m, shared, expected_headers=REQUIRED_HEADERS_50M)
     except zipfile.BadZipFile as exc:
         raise ReportError(
             "Workbook upload must be an .xlsx or .xlsm file. Legacy .xls files are not supported."
@@ -247,12 +348,10 @@ def _read_csv(file_bytes: bytes) -> list[dict[str, str]]:
 def load_csv_dataset(csv_10m_bytes: bytes, csv_50m_bytes: bytes, name_10m: str = "", name_50m: str = "") -> Dataset:
     points_10m = _read_csv(csv_10m_bytes)
     points_50m = _read_csv(csv_50m_bytes)
-    required_10m = {"id_10m", "Section", "Assessed25", "Mangrove_Presence_25", "Naturalness25", "Physical_Damage25"}
-    required_50m = {"id_10m", "Section", "Assessed25", "Mangrove_Presence25_50", "Density25", "Maturity25", "Condition_Score25"}
-    if not points_10m or not required_10m.issubset(points_10m[0].keys()):
-        raise ReportError(f"10m CSV must contain headers: {sorted(required_10m)}")
-    if not points_50m or not required_50m.issubset(points_50m[0].keys()):
-        raise ReportError(f"50m CSV must contain headers: {sorted(required_50m)}")
+    if not points_10m or not REQUIRED_HEADERS_10M.issubset(points_10m[0].keys()):
+        raise ReportError(f"10m CSV must contain headers: {sorted(REQUIRED_HEADERS_10M)}")
+    if not points_50m or not REQUIRED_HEADERS_50M.issubset(points_50m[0].keys()):
+        raise ReportError(f"50m CSV must contain headers: {sorted(REQUIRED_HEADERS_50M)}")
     return _finalize_dataset(points_10m, points_50m, source_name=f"{name_10m or '10m CSV'} + {name_50m or '50m CSV'}")
 
 

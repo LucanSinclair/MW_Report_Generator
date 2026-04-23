@@ -124,9 +124,30 @@ h3 {
   font-size: 0.92rem;
 }
 
+.field.is-hidden {
+  display: none;
+}
+
 .field span {
   color: var(--text);
   font-weight: 600;
+}
+
+.field-note {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.sheet-picker {
+  gap: 12px;
+  padding: 14px;
+  background: #f7faf7;
+  border: 1px solid #e1ebe2;
+  border-radius: 6px;
+}
+
+.subfield {
+  font-size: 0.88rem;
 }
 
 input[type="text"],
