@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mangrove Watch Report Generator</title>
+  <title>Mangrove Watch Assessment Workflow</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -11,157 +11,81 @@
     <section class="hero">
       <div>
         <p class="eyebrow">Mangrove Watch</p>
-        <h1>Report Generator</h1>
+        <h1>Assessment Workflow</h1>
         <p class="lede">
-          Upload a workbook or matching 10 m and 50 m CSV files, choose sections, and return
-          the habitat scores, summary table, and point maps.
+          Build the assessment workbook, publish the completed assessment into a year-stamped archive, then run reports from that archive.
         </p>
       </div>
+      <nav class="page-nav" aria-label="Workflow navigation">
+        <a class="secondary-link" href="{{ url_for('report') }}">Report Generator</a>
+      </nav>
     </section>
 
+    {% if error %}
     <section class="panel">
-      {% if error %}
       <div class="alert alert-error">{{ error }}</div>
-      {% endif %}
-      <form action="{{ url_for('report') }}" method="post" enctype="multipart/form-data" class="upload-form">
-        <div class="field-grid">
-          <label class="field">
-            <span>Workbook upload</span>
-            <input type="file" name="workbook" id="workbook-input" accept=".xlsm,.xlsx">
-            <small>Preferred. The app can auto-detect the 10 m and 50 m sheets, or you can override them below.</small>
-          </label>
+    </section>
+    {% endif %}
 
-          <div class="field sheet-picker is-hidden" id="sheet-picker">
-            <span>Workbook sheets</span>
-            <p class="field-note" id="sheet-picker-status">Choose a workbook to inspect its sheets.</p>
-            <label class="field subfield">
-              <span>10 m sheet</span>
-              <select name="workbook_sheet_10m" id="workbook-sheet-10m" disabled>
-                <option value="">Auto-detect 10 m sheet</option>
-              </select>
+    <section class="workflow-grid">
+      <article class="panel workflow-step">
+        <div class="step-heading">
+          <span class="step-number">1</span>
+          <h2>Build Assessment Workbook</h2>
+        </div>
+        <p class="table-note">
+          Creates an <code>ESTUARY_YEAR_ASSESSMENT.xlsx</code> file from the raw current-year CSV and the latest archive workbook.
+        </p>
+        <form action="{{ url_for('assessment_workbook') }}" method="post" enctype="multipart/form-data" class="upload-form">
+          <div class="field-grid">
+            <label class="field">
+              <span>Current-year raw CSV</span>
+              <input type="file" name="assessment_csv" accept=".csv" required>
+              <small>Expected columns include <code>ID</code>, <code>id_10m</code>, <code>INT_50</code>, <code>Hyperlink</code>, <code>Section</code>, and <code>Assessed</code>.</small>
             </label>
-            <label class="field subfield">
-              <span>50 m sheet</span>
-              <select name="workbook_sheet_50m" id="workbook-sheet-50m" disabled>
-                <option value="">Auto-detect 50 m sheet</option>
-              </select>
+
+            <label class="field">
+              <span>Current archive workbook</span>
+              <input type="file" name="archive_workbook" accept=".xlsm,.xlsx" required>
+              <small>Uses <code>Archive_10m</code>/<code>Archive_50m</code> or older <code>DATA_*_ALL</code>/<code>DATA_*_50</code> sheets to load previous years.</small>
+            </label>
+
+            <label class="field">
+              <span>Assessment year</span>
+              <input type="text" name="assessment_year" inputmode="numeric" placeholder="2025" value="{{ previous.assessment_year if previous else '' }}" required>
             </label>
           </div>
 
-          <label class="field">
-            <span>10 m CSV upload</span>
-            <input type="file" name="csv_10m" accept=".csv">
-            <small>Optional alternative. Must include the expected Mangrove Watch 10 m headers for the selected year.</small>
-          </label>
+          <div class="actions">
+            <button type="submit">Download Assessment Workbook</button>
+          </div>
+        </form>
+      </article>
 
-          <label class="field">
-            <span>50 m CSV upload</span>
-            <input type="file" name="csv_50m" accept=".csv">
-            <small>Required only when using CSV mode.</small>
-          </label>
-
-          <label class="field">
-            <span>Sections</span>
-            <input type="text" name="sections" placeholder="all or 1,2,6" value="{{ previous.sections if previous else 'all' }}">
-            <small>Use <code>all</code> or a comma-separated list.</small>
-          </label>
-
-          <label class="field">
-            <span>Output mode</span>
-            <select name="output_mode">
-              {% set selected = previous.output_mode if previous else 'both' %}
-              <option value="both" {% if selected == 'both' %}selected{% endif %}>Both pooled and by section</option>
-              <option value="pooled" {% if selected == 'pooled' %}selected{% endif %}>Pooled only</option>
-              <option value="by_section" {% if selected == 'by_section' %}selected{% endif %}>By section only</option>
-            </select>
-            <small>Pooled combines the selected sections into one result row.</small>
-          </label>
+      <article class="panel workflow-step">
+        <div class="step-heading">
+          <span class="step-number">2</span>
+          <h2>Create Updated Archive</h2>
         </div>
+        <p class="table-note">
+          Upload the edited assessment workbook after filling the current-year columns. Downloads a <code>DATA_ESTUARY_YEAR_ARCHIVE.xlsx</code> file.
+        </p>
+        <form action="{{ url_for('archive_workbook') }}" method="post" enctype="multipart/form-data" class="upload-form">
+          <div class="field-grid">
+            <label class="field">
+              <span>Completed assessment workbook</span>
+              <input type="file" name="completed_assessment_workbook" accept=".xlsx,.xlsm" required>
+              <small>The archive download contains only <code>Archive_10m</code> and <code>Archive_50m</code>.</small>
+            </label>
+          </div>
 
-        <div class="actions">
-          <button type="submit">Generate Report</button>
-        </div>
-      </form>
+          <div class="actions split-actions">
+            <button type="submit">Download Updated Archive</button>
+            <a class="secondary-link" href="{{ url_for('report') }}">Open Report Generator</a>
+          </div>
+        </form>
+      </article>
     </section>
   </main>
-
-  <script>
-    const workbookInput = document.getElementById("workbook-input");
-    const sheetPicker = document.getElementById("sheet-picker");
-    const sheetPickerStatus = document.getElementById("sheet-picker-status");
-    const sheet10mSelect = document.getElementById("workbook-sheet-10m");
-    const sheet50mSelect = document.getElementById("workbook-sheet-50m");
-
-    function resetSheetSelect(select, placeholder) {
-      select.innerHTML = "";
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = placeholder;
-      select.appendChild(option);
-      select.disabled = true;
-    }
-
-    function optionLabel(sheet) {
-      const tags = [];
-      if (sheet.matches_10m) tags.push("10 m match");
-      if (sheet.matches_50m) tags.push("50 m match");
-      return tags.length ? `${sheet.name} (${tags.join(", ")})` : sheet.name;
-    }
-
-    function fillSheetSelect(select, sheets, selectedName, placeholder) {
-      resetSheetSelect(select, placeholder);
-      sheets.forEach((sheet) => {
-        const option = document.createElement("option");
-        option.value = sheet.name;
-        option.textContent = optionLabel(sheet);
-        option.selected = sheet.name === selectedName;
-        select.appendChild(option);
-      });
-      select.disabled = false;
-    }
-
-    async function inspectWorkbook(file) {
-      resetSheetSelect(sheet10mSelect, "Auto-detect 10 m sheet");
-      resetSheetSelect(sheet50mSelect, "Auto-detect 50 m sheet");
-
-      if (!file) {
-        sheetPicker.classList.add("is-hidden");
-        sheetPickerStatus.textContent = "Choose a workbook to inspect its sheets.";
-        return;
-      }
-
-      sheetPicker.classList.remove("is-hidden");
-      sheetPickerStatus.textContent = "Inspecting workbook sheets...";
-
-      const formData = new FormData();
-      formData.append("workbook", file);
-
-      try {
-        const response = await fetch("{{ url_for('workbook_sheets') }}", {
-          method: "POST",
-          body: formData
-        });
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error || "Could not inspect workbook sheets.");
-        }
-
-        fillSheetSelect(sheet10mSelect, payload.sheets, payload.default_10m, "Auto-detect 10 m sheet");
-        fillSheetSelect(sheet50mSelect, payload.sheets, payload.default_50m, "Auto-detect 50 m sheet");
-
-        if (payload.default_10m || payload.default_50m) {
-          sheetPickerStatus.textContent = "Detected workbook sheets. Leave as-is or choose different sheets.";
-        } else {
-          sheetPickerStatus.textContent = "No obvious 10 m / 50 m match was found. Pick the sheets manually.";
-        }
-      } catch (error) {
-        sheetPickerStatus.textContent = error.message;
-      }
-    }
-
-    workbookInput.addEventListener("change", () => {
-      inspectWorkbook(workbookInput.files[0]);
-    });
-  </script>
 </body>
 </html>

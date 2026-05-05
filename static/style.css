@@ -110,6 +110,45 @@ h3 {
   margin-bottom: 0;
 }
 
+.page-nav {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 20px;
+}
+
+.workflow-step {
+  margin-bottom: 0;
+}
+
+.step-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.step-heading h2 {
+  margin-bottom: 0;
+}
+
+.step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -167,6 +206,12 @@ small {
 
 .actions {
   margin-top: 20px;
+}
+
+.split-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 button,
@@ -445,6 +490,10 @@ body.map-overlay-open {
   }
 
   .summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-grid {
     grid-template-columns: 1fr;
   }
 

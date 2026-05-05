@@ -15,7 +15,7 @@
         <h1>Report Results</h1>
         <p class="lede">{{ report.source_name }} | Sections: {{ report.selected_section_label }}</p>
       </div>
-      <a class="secondary-link" href="{{ url_for('index') }}">New run</a>
+      <a class="secondary-link" href="{{ url_for('report') }}">New report</a>
     </section>
 
     {% if report.warnings %}

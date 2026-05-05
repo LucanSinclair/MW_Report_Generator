@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mangrove Watch Report Generator</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Mangrove Watch</p>
+        <h1>Report Generator</h1>
+        <p class="lede">
+          Upload a year-stamped archive workbook, choose the assessment year, and generate scores, tables, and maps.
+        </p>
+      </div>
+      <nav class="page-nav" aria-label="Workflow navigation">
+        <a class="secondary-link" href="{{ url_for('index') }}">Assessment Workflow</a>
+      </nav>
+    </section>
+
+    <section class="panel">
+      {% if error %}
+      <div class="alert alert-error">{{ error }}</div>
+      {% endif %}
+      <form action="{{ url_for('report') }}" method="post" enctype="multipart/form-data" class="upload-form">
+        <div class="field-grid">
+          <label class="field">
+            <span>Archive workbook</span>
+            <input type="file" name="archive_report_workbook" accept=".xlsx,.xlsm" required>
+            <small>Use the latest <code>DATA_*_YEAR_ARCHIVE.xlsx</code> file.</small>
+          </label>
+
+          <label class="field">
+            <span>Report year</span>
+            <input type="text" name="archive_report_year" inputmode="numeric" placeholder="2025" value="{{ previous.archive_report_year if previous else '' }}" required>
+            <small>Run maps and scores for any year contained in the archive workbook.</small>
+          </label>
+
+          <label class="field">
+            <span>Sections</span>
+            <input type="text" name="sections" placeholder="all or 1,2,6" value="{{ previous.sections if previous else 'all' }}">
+            <small>Use <code>all</code> or a comma-separated list.</small>
+          </label>
+
+          <label class="field">
+            <span>Output mode</span>
+            <select name="output_mode">
+              {% set selected = previous.output_mode if previous else 'both' %}
+              <option value="both" {% if selected == 'both' %}selected{% endif %}>Both pooled and by section</option>
+              <option value="pooled" {% if selected == 'pooled' %}selected{% endif %}>Pooled only</option>
+              <option value="by_section" {% if selected == 'by_section' %}selected{% endif %}>By section only</option>
+            </select>
+            <small>Pooled combines the selected sections into one result row.</small>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="submit">Generate Report</button>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

@@ -30,6 +30,10 @@ SHEET_SCHEMAS = {
             "id_10m": ("id_10m",),
             "Section": ("Section",),
         },
+        "optional_fields": {
+            "lon_10m_point": ("lon_10m_point", "Longitude"),
+            "lat_10m_point": ("lat_10m_point", "Latitude"),
+        },
         "year_fields": {
             "Assessed": ("Assessed{yy}",),
             "Mangrove_Presence_10m": ("Mangrove_Presence_{yy}", "Mangrove_Presence{yy}"),
@@ -42,12 +46,53 @@ SHEET_SCHEMAS = {
             "id_10m": ("id_10m",),
             "Section": ("Section",),
         },
+        "optional_fields": {
+            "lon_10m_point": ("lon_10m_point", "Longitude"),
+            "lat_10m_point": ("lat_10m_point", "Latitude"),
+        },
         "year_fields": {
             "Assessed": ("Assessed{yy}",),
             "Mangrove_Presence_50m": ("Mangrove_Presence{yy}_50", "Mangrove_Presence_{yy}_50"),
             "Density": ("Density{yy}",),
             "Maturity": ("Maturity{yy}",),
             "Condition_Score": ("Condition_Score{yy}",),
+        },
+    },
+}
+ASSESSMENT_SHEET_SCHEMAS = {
+    "10m": {
+        "static_fields": {
+            "AssessmentYear": ("AssessmentYear",),
+            "id_10m": ("PointID", "id_10m", "id_10M"),
+            "Section": ("Section", "ReportCard"),
+        },
+        "optional_fields": {
+            "lon_10m_point": ("Longitude", "lon_10m_point"),
+            "lat_10m_point": ("Latitude", "lat_10m_point"),
+        },
+        "current_fields": {
+            "Assessed": ("Assessed_{year}", "Current_Assessed"),
+            "Mangrove_Presence_10m": ("Mangrove_Presence_{year}", "Current_Mangrove_Presence"),
+            "Naturalness": ("Naturalness_{year}", "Current_Naturalness"),
+            "Physical_Damage": ("Physical_Damage_{year}", "Current_Physical_Damage"),
+        },
+    },
+    "50m": {
+        "static_fields": {
+            "AssessmentYear": ("AssessmentYear",),
+            "id_10m": ("PointID", "id_10m", "id_10M"),
+            "Section": ("Section", "ReportCard"),
+        },
+        "optional_fields": {
+            "lon_10m_point": ("Longitude", "lon_10m_point"),
+            "lat_10m_point": ("Latitude", "lat_10m_point"),
+        },
+        "current_fields": {
+            "Assessed": ("Assessed_{year}", "Current_Assessed"),
+            "Mangrove_Presence_50m": ("Mangrove_Presence_50m_{year}", "Current_Mangrove_Presence_50m"),
+            "Density": ("Density_{year}", "Current_Density"),
+            "Maturity": ("Maturity_{year}", "Current_Maturity"),
+            "Condition_Score": ("Canopy_Cover_{year}", "Condition_Score_{year}", "Current_Condition_Score"),
         },
     },
 }
@@ -200,7 +245,62 @@ def _header_match(headers: set[str], candidates: tuple[str, ...]) -> str | None:
     return None
 
 
+def _add_optional_fields(field_map: dict[str, str], headers: set[str], schema: dict[str, Any]) -> None:
+    for canonical, candidates in schema.get("optional_fields", {}).items():
+        header = _header_match(headers, candidates)
+        if header is not None:
+            field_map[canonical] = header
+
+
+def _latest_header_year(headers: set[str]) -> int | None:
+    years = []
+    for header in headers:
+        for match in re.finditer(r"(?<!\d)(20\d{2})(?!\d)", header):
+            years.append(int(match.group(1)))
+    return max(years) if years else None
+
+
+def _format_assessment_candidates(candidates: tuple[str, ...], year: int | None) -> tuple[str, ...]:
+    output = []
+    for candidate in candidates:
+        if "{year}" in candidate:
+            if year is not None:
+                output.append(candidate.format(year=year))
+        else:
+            output.append(candidate)
+    return tuple(output)
+
+
+def _assessment_schema_field_map(headers: set[str], schema_name: str) -> dict[str, Any] | None:
+    schema = ASSESSMENT_SHEET_SCHEMAS[schema_name]
+    field_map: dict[str, str] = {}
+    assessment_year = _latest_header_year(headers)
+
+    for canonical, candidates in schema["static_fields"].items():
+        header = _header_match(headers, candidates)
+        if header is None:
+            return None
+        field_map[canonical] = header
+
+    for canonical, candidates in schema["current_fields"].items():
+        header = _header_match(headers, _format_assessment_candidates(candidates, assessment_year))
+        if header is None:
+            return None
+        field_map[canonical] = header
+
+    _add_optional_fields(field_map, headers, schema)
+    return {
+        "sheet_type": schema_name,
+        "assessment_year": assessment_year,
+        "field_map": field_map,
+    }
+
+
 def _schema_field_map(headers: set[str], schema_name: str) -> dict[str, Any] | None:
+    assessment_match = _assessment_schema_field_map(headers, schema_name)
+    if assessment_match is not None:
+        return assessment_match
+
     schema = SHEET_SCHEMAS[schema_name]
     field_map: dict[str, str] = {}
 
@@ -209,6 +309,8 @@ def _schema_field_map(headers: set[str], schema_name: str) -> dict[str, Any] | N
         if header is None:
             return None
         field_map[canonical] = header
+
+    _add_optional_fields(field_map, headers, schema)
 
     for year_suffix in _candidate_years(headers):
         year_field_map = dict(field_map)
@@ -235,6 +337,27 @@ def _normalize_rows(rows: list[dict[str, str]], field_map: dict[str, str]) -> li
             normalized[canonical] = row.get(actual, "")
         normalized_rows.append(normalized)
     return normalized_rows
+
+
+def _assessment_year_from_rows(match: dict[str, Any], rows: list[dict[str, str]], label: str) -> int:
+    if match.get("assessment_year") is not None:
+        return int(match["assessment_year"])
+
+    for row in rows:
+        year = _parse_int(row.get("AssessmentYear"))
+        if year is not None:
+            match["assessment_year"] = year
+            return year
+
+    raise ReportError(f"Could not determine the assessment year from the {label} assessment sheet.")
+
+
+def _field_map_metadata(sheet_type: str, field_map: dict[str, str], assessment_year: int) -> dict[str, Any]:
+    return {
+        "sheet_type": sheet_type,
+        "assessment_year": assessment_year,
+        "field_map": field_map,
+    }
 
 
 def _indicator_mapping(metadata: dict[str, Any]) -> list[dict[str, str]]:
@@ -294,7 +417,14 @@ def _sheet_xml_path_by_name(zf: zipfile.ZipFile) -> dict[str, str]:
     result: dict[str, str] = {}
     for sheet in workbook.find("main:sheets", NS):
         rel_id = sheet.attrib["{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"]
-        result[sheet.attrib["name"]] = "xl/" + rel_map[rel_id].lstrip("/")
+        target = rel_map[rel_id]
+        if target.startswith("/"):
+            path = target.lstrip("/")
+        elif target.startswith("xl/"):
+            path = target
+        else:
+            path = "xl/" + target
+        result[sheet.attrib["name"]] = path
     return result
 
 
@@ -390,6 +520,14 @@ def _read_sheet_rows(
         if any(_clean(value) for value in record.values()):
             rows.append(record)
     return rows
+
+
+def _sheet_name_casefold(sheet_map: dict[str, str], target_name: str) -> str | None:
+    target = target_name.casefold()
+    for name in sheet_map:
+        if name.casefold() == target:
+            return name
+    return None
 
 
 def _find_sheet(sheet_map: dict[str, str], expected_headers: set[str]) -> str:
@@ -503,6 +641,8 @@ def load_workbook_dataset(
                 ),
                 match_50m["field_map"],
             )
+            assessment_year_10m = _assessment_year_from_rows(match_10m, points_10m, "10 m")
+            assessment_year_50m = _assessment_year_from_rows(match_50m, points_50m, "50 m")
             sheet_names = {
                 "10m": _clean(sheet_10m_name) or next(name for name, path in sheet_map.items() if path == sheet_10m),
                 "50m": _clean(sheet_50m_name) or next(name for name, path in sheet_map.items() if path == sheet_50m),
@@ -516,7 +656,7 @@ def load_workbook_dataset(
         points_50m,
         source_name=filename or "Workbook",
         metadata={
-            "assessment_year": min(match_10m["assessment_year"], match_50m["assessment_year"]),
+            "assessment_year": min(assessment_year_10m, assessment_year_50m),
             "field_maps": {"10m": match_10m, "50m": match_50m},
             "sheet_names": sheet_names,
         },
@@ -540,14 +680,159 @@ def load_csv_dataset(csv_10m_bytes: bytes, csv_50m_bytes: bytes, name_10m: str =
         raise ReportError("10m CSV does not contain the required Mangrove Watch 10 m headers.")
     if not points_50m or match_50m is None:
         raise ReportError("50m CSV does not contain the required Mangrove Watch 50 m headers.")
+    normalized_10m = _normalize_rows(points_10m, match_10m["field_map"])
+    normalized_50m = _normalize_rows(points_50m, match_50m["field_map"])
+    assessment_year_10m = _assessment_year_from_rows(match_10m, normalized_10m, "10 m")
+    assessment_year_50m = _assessment_year_from_rows(match_50m, normalized_50m, "50 m")
     return _finalize_dataset(
-        _normalize_rows(points_10m, match_10m["field_map"]),
-        _normalize_rows(points_50m, match_50m["field_map"]),
+        normalized_10m,
+        normalized_50m,
         source_name=f"{name_10m or '10m CSV'} + {name_50m or '50m CSV'}",
         metadata={
-            "assessment_year": min(match_10m["assessment_year"], match_50m["assessment_year"]),
+            "assessment_year": min(assessment_year_10m, assessment_year_50m),
             "field_maps": {"10m": match_10m, "50m": match_50m},
             "sheet_names": {"10m": name_10m or "10m CSV", "50m": name_50m or "50m CSV"},
+        },
+    )
+
+
+def _parse_archive_year(value: Any) -> int:
+    year = _parse_int(value)
+    if year is None or year < 2000 or year > 2100:
+        raise ReportError("Choose a valid archive report year, for example 2025.")
+    return year
+
+
+def _archive_row_year(row: dict[str, str]) -> int | None:
+    return _parse_int(row.get("AssessmentYear"))
+
+
+def _archive_row_value(row: dict[str, str], *names: str) -> str:
+    for name in names:
+        value = _clean(row.get(name))
+        if value:
+            return value
+    return ""
+
+
+def _archive_10m_rows(rows: list[dict[str, str]], assessment_year: int) -> list[dict[str, str]]:
+    output = []
+    for row in rows:
+        if _archive_row_year(row) != assessment_year:
+            continue
+        point_id = _archive_row_value(row, "id_10M", "id_10m", "PointID")
+        if not point_id:
+            continue
+        section = _archive_row_value(row, "Section", "ReportCard")
+        output.append(
+            {
+                **row,
+                "id_10m": point_id,
+                "Section": section,
+                "Assessed": _archive_row_value(row, "Assessed"),
+                "lon_10m_point": _archive_row_value(row, "Longitude", "lon_10m_point"),
+                "lat_10m_point": _archive_row_value(row, "Latitude", "lat_10m_point"),
+                "Mangrove_Presence_10m": _archive_row_value(row, "Mangrove_Presence"),
+                "Naturalness": _archive_row_value(row, "Naturalness"),
+                "Physical_Damage": _archive_row_value(row, "Physical_Damage"),
+            }
+        )
+    return output
+
+
+def _archive_50m_rows(rows: list[dict[str, str]], assessment_year: int) -> list[dict[str, str]]:
+    output = []
+    for row in rows:
+        if _archive_row_year(row) != assessment_year:
+            continue
+        point_id = _archive_row_value(row, "PointID", "id_10m", "id_10M")
+        if not point_id:
+            continue
+        section = _archive_row_value(row, "Section", "ReportCard")
+        output.append(
+            {
+                **row,
+                "id_10m": point_id,
+                "Section": section,
+                "Assessed": _archive_row_value(row, "Assessed"),
+                "lon_10m_point": _archive_row_value(row, "Longitude", "lon_10m_point"),
+                "lat_10m_point": _archive_row_value(row, "Latitude", "lat_10m_point"),
+                "Mangrove_Presence_50m": _archive_row_value(row, "Mangrove_Presence_50m"),
+                "Density": _archive_row_value(row, "Density"),
+                "Maturity": _archive_row_value(row, "Maturity"),
+                "Condition_Score": _archive_row_value(row, "Condition_Score"),
+            }
+        )
+    return output
+
+
+def load_archive_dataset(file_bytes: bytes, filename: str = "", assessment_year: Any = "") -> Dataset:
+    year = _parse_archive_year(assessment_year)
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            shared = _shared_strings(zf)
+            sheet_map = _sheet_xml_path_by_name(zf)
+            sheet_10m_name = _sheet_name_casefold(sheet_map, "Archive_10m")
+            sheet_50m_name = _sheet_name_casefold(sheet_map, "Archive_50m")
+            if sheet_10m_name is None or sheet_50m_name is None:
+                raise ReportError("Archive workbook must contain Archive_10m and Archive_50m sheets.")
+            archive_10m = _read_sheet_rows(
+                zf,
+                sheet_map[sheet_10m_name],
+                shared,
+                expected_headers={"AssessmentYear", "id_10M"},
+            )
+            archive_50m = _read_sheet_rows(
+                zf,
+                sheet_map[sheet_50m_name],
+                shared,
+                expected_headers={"AssessmentYear", "PointID"},
+            )
+    except zipfile.BadZipFile as exc:
+        raise ReportError("Archive workbook must be an .xlsx or .xlsm file.") from exc
+
+    points_10m = _archive_10m_rows(archive_10m, year)
+    points_50m = _archive_50m_rows(archive_50m, year)
+    if not points_10m and not points_50m:
+        raise ReportError(f"No archive rows were found for {year}. Check the selected report year.")
+
+    field_map_10m = _field_map_metadata(
+        "10m",
+        {
+            "Section": "Section / ReportCard",
+            "Mangrove_Presence_10m": "Mangrove_Presence",
+            "Density": "N/A",
+            "Maturity": "N/A",
+            "Condition_Score": "N/A",
+            "Physical_Damage": "Physical_Damage",
+            "Naturalness": "Naturalness",
+            "Assessed": "Assessed",
+        },
+        year,
+    )
+    field_map_50m = _field_map_metadata(
+        "50m",
+        {
+            "Section": "Section / ReportCard",
+            "Mangrove_Presence_50m": "Mangrove_Presence_50m",
+            "Density": "Density",
+            "Maturity": "Maturity",
+            "Condition_Score": "Condition_Score",
+            "Physical_Damage": "N/A",
+            "Naturalness": "N/A",
+            "Assessed": "Assessed",
+        },
+        year,
+    )
+
+    return _finalize_dataset(
+        points_10m,
+        points_50m,
+        source_name=filename or "Archive Workbook",
+        metadata={
+            "assessment_year": year,
+            "field_maps": {"10m": field_map_10m, "50m": field_map_50m},
+            "sheet_names": {"10m": "Archive_10m", "50m": "Archive_50m"},
         },
     )
 
@@ -585,6 +870,14 @@ def _finalize_dataset(
             row["Section"] = section_by_id[point_id]
 
     sections_available = sorted({_clean(row.get("Section")) for row in points_10m if _clean(row.get("Section"))}, key=_sort_key)
+    estuary_name = next(
+        (
+            _clean(row.get("Estuary"))
+            for row in points_10m + points_50m
+            if _clean(row.get("Estuary"))
+        ),
+        "",
+    )
     base_metadata = dict(metadata or {})
     base_metadata.update(
         {
@@ -592,6 +885,8 @@ def _finalize_dataset(
             "sections_available": sections_available,
         }
     )
+    if estuary_name and not base_metadata.get("estuary_name"):
+        base_metadata["estuary_name"] = estuary_name
     if "indicator_mapping" not in base_metadata and "field_maps" in base_metadata:
         base_metadata["indicator_mapping"] = _indicator_mapping(base_metadata)
     return Dataset(
@@ -1128,6 +1423,7 @@ def generate_report(dataset: Dataset, sections: list[str] | None = None, output_
         "source_name": dataset.metadata["source_name"],
         "sections_available": dataset.metadata["sections_available"],
         "assessment_year": dataset.metadata.get("assessment_year"),
+        "estuary_name": dataset.metadata.get("estuary_name", ""),
         "sheet_names": dataset.metadata.get("sheet_names", {}),
         "indicator_mapping": dataset.metadata.get("indicator_mapping", []),
         "selected_sections": sections or dataset.metadata["sections_available"],
