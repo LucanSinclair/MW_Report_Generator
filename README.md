@@ -215,3 +215,25 @@ If the assessment workbook cannot be built, check:
 - the current CSV has the expected columns
 - the archive workbook has readable archive sheets
 - the assessment year is a four-digit year, such as `2025`
+
+
+## Waypoint POI forms
+
+Open **Waypoint Form** (`/waypoints`), upload a GPX waypoint file, and download
+`<survey>_POI.xlsx`. The first four columns match the supplied legacy sheet:
+`FID`, `time`, `name`, `POI`. Longitude and Latitude travel with the form for
+mapping. Classify POI manually using the dropdown, add Notes if useful, and
+save the completed .xlsx. Optional Watercourse/Subsection fields should match
+the dashboard labels when using those filters.
+
+The category labels and RGB colours in `poi_categories.json` were extracted
+from `Impact Colours_with mangroves.qml`. Mangroves is an explicit dropdown
+choice. Blank POIs are unfinished and are omitted from the public waypoint
+layer. GPX timestamps retain their original timezone.
+
+A hidden `_Survey` sheet carries a stable GPX-derived survey ID. Preserve it
+when editing so re-importing a revised form replaces the same survey.
+Blank POI rows stay unfinished, and the importer reports their count.
+
+Pass the completed form to the dashboard administrator, who runs
+`scripts/import_waypoints.py` with the NRM region, estuary key and year.
