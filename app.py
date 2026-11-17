@@ -13,6 +13,7 @@ from assessment_workbook import (
     append_assessment_to_archive_workbook,
     build_assessment_workbook,
 )
+from waypoint_workbook import CATEGORIES, WaypointError, build_waypoint_workbook
 from scoring import (
     ReportError,
     generate_report,
@@ -113,6 +114,21 @@ def _xlsx_response(file_bytes: bytes, filename: str) -> Response:
 @app.route("/", methods=["GET"])
 def index():
     return render_template("index.html")
+
+
+@app.route("/waypoints", methods=["GET", "POST"])
+def waypoints():
+    if request.method == "GET":
+        return render_template("waypoints.html", categories=CATEGORIES)
+    upload = request.files.get("gpx_file")
+    try:
+        if upload is None or not upload.filename or not upload.filename.lower().endswith(".gpx"):
+            raise WaypointError("Choose a GPX waypoint file.")
+        workbook = build_waypoint_workbook(upload.read(16 * 1024 * 1024 + 1), upload.filename)
+    except WaypointError as exc:
+        return render_template("waypoints.html", categories=CATEGORIES, error=str(exc)), 400
+    filename = _download_name(os.path.splitext(upload.filename)[0], "SURVEY")
+    return _xlsx_response(workbook, f"{filename}_POI.xlsx")
 
 
 @app.route("/assessment-workbook", methods=["POST"])

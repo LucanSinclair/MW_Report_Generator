@@ -1,0 +1,41 @@
+{
+  "source": "Impact Colours_with mangroves.qml",
+  "categories": [
+    {
+      "label": "Accretion",
+      "color": "#B2DF8A"
+    },
+    {
+      "label": "Debris",
+      "color": "#9F5A22"
+    },
+    {
+      "label": "Dieback",
+      "color": "#FF7F00"
+    },
+    {
+      "label": "Erosion",
+      "color": "#E41A1C"
+    },
+    {
+      "label": "Litter",
+      "color": "#CF6AFB"
+    },
+    {
+      "label": "Resources",
+      "color": "#0DA5F1"
+    },
+    {
+      "label": "Structure",
+      "color": "#A0A0A0"
+    },
+    {
+      "label": "Wildlife",
+      "color": "#F1E10C"
+    },
+    {
+      "label": "Mangroves",
+      "color": "#54B04A"
+    }
+  ]
+}
